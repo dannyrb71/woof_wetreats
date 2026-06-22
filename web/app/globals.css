@@ -1,0 +1,56 @@
+:root {
+  /* Main page body background — the area below the header/nav bar.
+     Change this one value to re-theme the whole app's body background. */
+  --page-bg: #eaeae5;
+
+  /* Subtle inner fills (note boxes, price box, detail panels) that sit on
+     top of white cards. Distinct from the page background on purpose. */
+  --surface-muted: #f9fafb;
+
+  /* The ONE interactive-hover shadow used across the whole site — reused
+     directly from the existing card-hover treatment (staff HouseholdCard)
+     so buttons, links, and cards all share the same "this is interactive"
+     feel. Change here to change it everywhere. */
+  --hover-shadow: 0 8px 32px rgba(0, 0, 0, 0.13);
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background: var(--page-bg);
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* ── Site-wide interactive states ──────────────────────────────
+   Every button and clickable link gets a consistent rollover (desktop
+   hover) and tap (mobile touch) treatment: slightly darker + the shared
+   card-hover shadow. Inline styles can't express :hover/:active, so this
+   lives here and applies everywhere automatically. */
+a,
+button {
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+a:hover,
+button:hover:not(:disabled),
+a:active,
+button:active:not(:disabled) {
+  filter: brightness(0.93);
+  box-shadow: var(--hover-shadow);
+}
+
+/* Tap feedback on touch devices — a touch fires :active */
+a:active,
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Disabled buttons stay flat */
+button:disabled {
+  filter: none;
+  box-shadow: none;
+}

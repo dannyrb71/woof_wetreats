@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
@@ -27,7 +27,9 @@ function fmtTime(t: string): string {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`
 }
 
-export default function ConfirmationPage() {
+// useSearchParams() requires a Suspense boundary during static generation,
+// so the data-loading body lives in a child wrapped by <Suspense> below.
+function ConfirmationContent() {
   const router      = useRouter()
   const params      = useSearchParams()
   const id          = params.get('id')
@@ -61,7 +63,13 @@ export default function ConfirmationPage() {
         .eq('reservation_id', id)
 
       if (rd) {
-        setDogNames(rd.map((r: { dogs: { name: string } | null }) => r.dogs?.name ?? '').filter(Boolean))
+        // Supabase types the embedded `dogs(name)` join as an array; normalize
+        // to handle either an object or a single-element array at runtime.
+        const rows = rd as unknown as Array<{ dogs: { name: string } | { name: string }[] | null }>
+        const names = rows
+          .map(r => (Array.isArray(r.dogs) ? r.dogs[0] : r.dogs)?.name ?? '')
+          .filter(Boolean)
+        setDogNames(names)
       }
       setLoading(false)
     }
@@ -182,6 +190,14 @@ export default function ConfirmationPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function ConfirmationPage() {
+  return (
+    <Suspense fallback={<div style={s.center}><p style={{ color: '#6b7280' }}>Loading…</p></div>}>
+      <ConfirmationContent />
+    </Suspense>
   )
 }
 

@@ -265,6 +265,20 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
     onUpdate({ ...household, meet_greet_status: 'completed', mg_status: 'completed' })
   }
 
+  // Direct "completed" override — works from ANY status, no schedule required.
+  // Staff are admins, so the clients.meet_greet_status guard trigger permits it.
+  async function toggleMeetGreetCompleted() {
+    const next = mgStatus === 'completed' ? 'needed' : 'completed'
+    setMgSaving(true)
+    setMgErr('')
+    const { error } = await supabase
+      .from('clients').update({ meet_greet_status: next }).eq('id', household.client_id)
+    setMgSaving(false)
+    if (error) { setMgErr('Could not update — please try again.'); return }
+    setMgStatus(next)
+    onUpdate({ ...household, meet_greet_status: next })
+  }
+
   // Client detail (lazy-loaded)
   const [detail, setDetail] = useState<ClientDetail | null>(null)
 
@@ -436,6 +450,31 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
               ✅ Meet &amp; Greet complete — this client can book.
             </p>
           )}
+
+          {/* ── Direct override: mark completed from any status ── */}
+          <div style={s.mgToggleRow}>
+            <div>
+              <p style={s.mgToggleLabel}>Meet &amp; Greet Completed</p>
+              <p style={s.mgToggleHint}>
+                Override at any time — flips status straight to completed (no scheduling needed), or back to needed.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={mgStatus === 'completed'}
+              onClick={toggleMeetGreetCompleted}
+              disabled={mgSaving}
+              style={{
+                ...s.toggle,
+                background: mgStatus === 'completed' ? '#16a34a' : '#d1d5db',
+                cursor: mgSaving ? 'not-allowed' : 'pointer',
+                opacity: mgSaving ? 0.6 : 1,
+              }}
+            >
+              <span style={{ ...s.toggleKnob, transform: mgStatus === 'completed' ? 'translateX(20px)' : 'translateX(0)' }} />
+            </button>
+          </div>
         </div>
 
         {/* ── Reservation details ── */}
@@ -680,6 +719,11 @@ const s: Record<string, React.CSSProperties> = {
   notesTextarea:  { width: '100%', borderRadius: 8, border: '1px solid #e5e7eb', padding: '10px 12px', fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit', resize: 'vertical', background: '#fff', color: '#111827', boxSizing: 'border-box', outline: '2px solid transparent', transition: 'outline 0.15s' },
   editBtn:        { fontSize: 12, fontWeight: 600, padding: '5px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', fontFamily: 'inherit' },
   cancelBtn:      { fontSize: 12, fontWeight: 600, padding: '5px 14px', borderRadius: 8, border: '1px solid #fecdd3', background: '#fff', color: '#be123c', cursor: 'pointer', fontFamily: 'inherit' },
+  mgToggleRow:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 16, paddingTop: 16, borderTop: '1px solid #f3f4f6' },
+  mgToggleLabel:  { margin: 0, fontSize: 14, fontWeight: 700, color: '#111827' },
+  mgToggleHint:   { margin: '3px 0 0', fontSize: 12, color: '#6b7280', lineHeight: 1.5, maxWidth: 460 },
+  toggle:         { position: 'relative', width: 44, height: 24, borderRadius: 999, border: 'none', padding: 0, flexShrink: 0, transition: 'background 0.15s', fontFamily: 'inherit' },
+  toggleKnob:     { position: 'absolute', top: 2, left: 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'transform 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' },
   cancelYes:      { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 8, border: 'none', background: '#be123c', color: '#fff', cursor: 'pointer', fontFamily: 'inherit' },
   cancelNo:       { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 8, border: 'none', background: '#f3f4f6', color: '#374151', cursor: 'pointer', fontFamily: 'inherit' },
   blockBtn:       { fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 8, border: 'none', color: '#fff', fontFamily: 'inherit', transition: 'opacity 0.15s' },

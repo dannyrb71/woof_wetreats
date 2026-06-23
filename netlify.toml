@@ -6,3 +6,9 @@
 [build]
   base = "web"
   command = "npm run build"
+
+# Explicitly enable the Next.js runtime so Netlify adapts the build output
+# (SSR routes → serverless functions) instead of publishing raw source.
+# Don't set `publish` manually — this plugin manages it (.next).
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

@@ -14,9 +14,22 @@
   --hover-shadow: 0 8px 32px rgba(0, 0, 0, 0.13);
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body {
   margin: 0;
+  /* Guard against any stray horizontal overflow on small screens */
+  overflow-x: hidden;
+}
+
+/* Media never overflows its container */
+img {
+  max-width: 100%;
 }
 
 body {

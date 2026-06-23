@@ -2,6 +2,7 @@
 import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { COLORS, Household, DogRow, monthsOld, fmtDate, fmtTime } from './HouseholdCard'
+import { StaffReservations } from './StaffReservations'
 
 // 30-minute time slots (7:00 AM – 8:00 PM). Value is 24h "HH:MM" for the DB;
 // label is the friendly 12h form. Only :00 and :30 are selectable.
@@ -477,86 +478,15 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
           </div>
         </div>
 
-        {/* ── Reservation details ── */}
-        {hasRes && (
-          <div style={s.sectionCard}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ ...s.sectionTitle, margin: 0 }}>Reservation Details</h2>
-              {!editRes && household.reservation_id && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  {res.res_status !== 'cancelled' && (
-                    cancelConfirm ? (
-                      <>
-                        <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>Cancel this reservation?</span>
-                        <button type="button" onClick={cancelReservation} disabled={cancelling} style={s.cancelYes}>
-                          {cancelling ? 'Cancelling…' : 'Yes, cancel'}
-                        </button>
-                        <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling} style={s.cancelNo}>Keep</button>
-                      </>
-                    ) : (
-                      <button type="button" onClick={() => { setCancelConfirm(true); setCancelErr('') }} style={s.cancelBtn}>
-                        Cancel Reservation
-                      </button>
-                    )
-                  )}
-                  <button type="button" onClick={openEditRes} style={s.editBtn}>Edit</button>
-                </div>
-              )}
-            </div>
-            {cancelErr && <p style={{ margin: '0 0 12px', fontSize: 13, color: '#ef4444' }}>{cancelErr}</p>}
-
-            {editRes ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={s.editRow}>
-                  <label style={s.editLabel}>
-                    Drop-off date
-                    <input type="date" value={editDropoff} onChange={e => setEditDropoff(e.target.value)}
-                      style={s.editInput} />
-                  </label>
-                  <label style={s.editLabel}>
-                    Pick-up date
-                    <input type="date" value={editPickup} onChange={e => setEditPickup(e.target.value)}
-                      style={s.editInput} min={editDropoff} />
-                  </label>
-                </div>
-                <label style={s.editLabel}>
-                  Payment method
-                  <select value={editPayment} onChange={e => setEditPayment(e.target.value as 'cash'|'venmo')} style={s.editInput}>
-                    <option value="cash">💵 Cash</option>
-                    <option value="venmo">💙 Venmo</option>
-                  </select>
-                </label>
-                <label style={s.editLabel}>
-                  Reason for change <span style={{ color: '#ef4444' }}>*</span>
-                  <textarea value={editReason} onChange={e => setEditReason(e.target.value)}
-                    placeholder="e.g. Client requested extension to July 30"
-                    rows={2} style={{ ...s.editInput, resize: 'vertical', fontFamily: 'inherit' }} />
-                </label>
-                {resErr && <p style={{ margin: 0, fontSize: 13, color: '#ef4444' }}>{resErr}</p>}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button type="button" onClick={saveReservation} disabled={resSaving}
-                    style={{ ...s.saveBtn, background: resSaving ? '#e5e7eb' : color, color: resSaving ? '#9ca3af' : '#fff', cursor: resSaving ? 'not-allowed' : 'pointer' }}>
-                    {resSaving ? 'Saving…' : 'Save Changes'}
-                  </button>
-                  <button type="button" onClick={() => setEditRes(false)} style={s.cancelEditBtn}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <dl style={s.infoGrid}>
-                <InfoRow label="Drop-off"    value={fmtDateLong(res.dropoff_date)} />
-                <InfoRow label="Pick-up"     value={fmtDateLong(res.pickup_date)} />
-                {nights !== null
-                  ? <InfoRow label="Total nights" value={nights === 1 ? '1 night' : `${nights} nights`} />
-                  : <InfoRow label="Date"         value={fmtDate(res.dropoff_date)} />
-                }
-                <InfoRow label="Payment"     value={res.payment_method ?? '—'} />
-                <InfoRow label="Total price" value={res.total_price != null ? `$${Number(res.total_price).toFixed(2)}` : '—'} />
-              </dl>
-            )}
-          </div>
-        )}
+        {/* ── Reservations (all of them) + staff create ── */}
+        <div style={s.sectionCard}>
+          <StaffReservations
+            clientId={household.client_id}
+            dogs={household.dogs.map((d: DogRow) => ({ id: d.id, name: d.name, birthdate: d.birthdate }))}
+            meetGreetCompleted={mgStatus === 'completed'}
+            onChanged={() => onUpdate(household)}
+          />
+        </div>
 
         {/* ── Dogs ── */}
         <div>

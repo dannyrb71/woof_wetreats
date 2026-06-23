@@ -113,6 +113,25 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   const [resSaving,    setResSaving]    = useState(false)
   const [resErr,       setResErr]       = useState('')
 
+  // Reservation cancellation
+  const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [cancelling,    setCancelling]    = useState(false)
+  const [cancelErr,     setCancelErr]     = useState('')
+
+  async function cancelReservation() {
+    if (!household.reservation_id) return
+    setCancelling(true)
+    setCancelErr('')
+    // Staff are admins, so the cancellation guard trigger permits any status → cancelled
+    const { error } = await supabase
+      .from('reservations').update({ status: 'cancelled' }).eq('id', household.reservation_id)
+    setCancelling(false)
+    if (error) { setCancelErr('Could not cancel — please try again.'); return }
+    setRes(r => ({ ...r, res_status: 'cancelled' }))
+    onUpdate({ ...household, res_status: 'cancelled' })
+    setCancelConfirm(false)
+  }
+
   function openEditRes() {
     setEditDropoff(res.dropoff_date)
     setEditPickup(res.pickup_date)
@@ -425,9 +444,27 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ ...s.sectionTitle, margin: 0 }}>Reservation Details</h2>
               {!editRes && household.reservation_id && (
-                <button type="button" onClick={openEditRes} style={s.editBtn}>Edit</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {res.res_status !== 'cancelled' && (
+                    cancelConfirm ? (
+                      <>
+                        <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>Cancel this reservation?</span>
+                        <button type="button" onClick={cancelReservation} disabled={cancelling} style={s.cancelYes}>
+                          {cancelling ? 'Cancelling…' : 'Yes, cancel'}
+                        </button>
+                        <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling} style={s.cancelNo}>Keep</button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={() => { setCancelConfirm(true); setCancelErr('') }} style={s.cancelBtn}>
+                        Cancel Reservation
+                      </button>
+                    )
+                  )}
+                  <button type="button" onClick={openEditRes} style={s.editBtn}>Edit</button>
+                </div>
               )}
             </div>
+            {cancelErr && <p style={{ margin: '0 0 12px', fontSize: 13, color: '#ef4444' }}>{cancelErr}</p>}
 
             {editRes ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -642,6 +679,9 @@ const s: Record<string, React.CSSProperties> = {
   saveBtn:       { fontSize: 13, fontWeight: 600, padding: '6px 16px', borderRadius: 8, border: 'none', transition: 'background 0.15s' },
   notesTextarea:  { width: '100%', borderRadius: 8, border: '1px solid #e5e7eb', padding: '10px 12px', fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit', resize: 'vertical', background: '#fff', color: '#111827', boxSizing: 'border-box', outline: '2px solid transparent', transition: 'outline 0.15s' },
   editBtn:        { fontSize: 12, fontWeight: 600, padding: '5px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', fontFamily: 'inherit' },
+  cancelBtn:      { fontSize: 12, fontWeight: 600, padding: '5px 14px', borderRadius: 8, border: '1px solid #fecdd3', background: '#fff', color: '#be123c', cursor: 'pointer', fontFamily: 'inherit' },
+  cancelYes:      { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 8, border: 'none', background: '#be123c', color: '#fff', cursor: 'pointer', fontFamily: 'inherit' },
+  cancelNo:       { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 8, border: 'none', background: '#f3f4f6', color: '#374151', cursor: 'pointer', fontFamily: 'inherit' },
   blockBtn:       { fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 8, border: 'none', color: '#fff', fontFamily: 'inherit', transition: 'opacity 0.15s' },
   editRow:        { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
   editLabel:      { display: 'flex', flexDirection: 'column' as const, gap: 4, fontSize: 12, fontWeight: 600, color: '#374151' },

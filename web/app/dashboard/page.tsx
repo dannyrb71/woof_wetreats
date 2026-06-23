@@ -761,6 +761,12 @@ export default function DashboardPage() {
           .order('dropoff_date', { ascending: false }),
       ])
 
+      // No profile row yet (new client who hasn't onboarded) → send to onboarding
+      if (profileRes.error?.code === 'PGRST116' || !profileRes.data) {
+        router.replace('/onboarding')
+        return
+      }
+
       if (profileRes.error || dogsRes.error || resRes.error) {
         setError('Failed to load your dashboard. Please refresh.')
         setLoading(false)

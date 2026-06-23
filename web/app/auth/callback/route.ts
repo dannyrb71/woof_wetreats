@@ -3,8 +3,10 @@ import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Handles the redirect from Google/Facebook OAuth.
-// Exchanges the code for a session, then sends the browser to /
-// which runs the auth status check and routes to the right page.
+// Exchanges the code for a session, then routes the user to the right
+// page server-side (staff → /staff, new/incomplete → /onboarding,
+// blocked → /blocked, complete → /dashboard). We can't rely on '/'
+// for this anymore — '/' is now the public landing page.
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code  = searchParams.get('code')
@@ -31,7 +33,18 @@ export async function GET(request: NextRequest) {
     )
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
     if (!exchangeError) {
-      return NextResponse.redirect(`${origin}/`)
+      // Route based on staff status + profile completeness (mirrors routeUser)
+      const { data: isAdmin } = await supabase.rpc('is_admin')
+      if (isAdmin) {
+        return NextResponse.redirect(`${origin}/staff`)
+      }
+      const { data: statusRows } = await supabase.rpc('get_client_auth_status')
+      const status = statusRows?.[0]?.status
+      const dest =
+        status === 'complete' ? '/dashboard' :
+        status === 'blocked'  ? '/blocked'   :
+                                '/onboarding'   // 'new' | 'incomplete' | unknown
+      return NextResponse.redirect(`${origin}${dest}`)
     }
   }
 

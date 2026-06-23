@@ -1,0 +1,8 @@
+# Netlify build config — pins the Next.js app's location so the base
+# directory can't be lost from the UI. The app lives in web/.
+# The official @netlify/plugin-nextjs runtime is auto-installed when
+# Netlify detects Next.js in the base directory, and it manages the
+# publish/functions output (.next) automatically.
+[build]
+  base = "web"
+  command = "npm run build"

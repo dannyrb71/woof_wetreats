@@ -6,6 +6,8 @@
 [build]
   base = "web"
   command = "npm run build"
+  # Must differ from base (web). Resolved relative to base → web/.next.
+  publish = ".next"
 
 # Explicitly enable the Next.js runtime so Netlify adapts the build output
 # (SSR routes → serverless functions) instead of publishing raw source.

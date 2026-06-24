@@ -28,6 +28,7 @@ interface ScheduleRow {
   reservation_id: string | null
   meet_greet_id:  string | null
   event_time:     string | null
+  pickup_time:    string | null
   dropoff_date:   string | null
   pickup_date:    string | null
   dogs:           ScheduleDog[]
@@ -107,7 +108,9 @@ function ActivityRow({ row, onOpen }: { row: ScheduleRow; onOpen: (clientId: str
       <div style={s.rowTop}>
         <div style={s.rowLeft}>
           <span style={{ ...s.activityBadge, color: a.color, borderColor: a.color }}>{a.label}</span>
-          {row.event_time && <span style={s.time}>{fmtTime(row.event_time)}</span>}
+          {row.activity_type === 'daycare'
+            ? <span style={s.time}>{fmtTime(row.event_time)}{row.pickup_time ? ` → ${fmtTime(row.pickup_time)}` : ''}</span>
+            : (row.event_time && <span style={s.time}>{fmtTime(row.event_time)}</span>)}
           {row.activity_type === 'in_progress' && row.dropoff_date && row.pickup_date && (
             <span style={s.spanDates}>{fmtDateShort(row.dropoff_date)} → {fmtDateShort(row.pickup_date)}</span>
           )}

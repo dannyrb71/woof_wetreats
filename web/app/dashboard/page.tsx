@@ -599,10 +599,16 @@ function ReservationCard({ res, onCancel }: { res: Reservation; onCancel: (id: s
           <span style={s.dateLabel}>Drop-off</span>
           <span style={s.dateVal}>{fmtDate(res.dropoff_date)} · {fmtTime(res.dropoff_time)}</span>
         </div>
-        {isBoarding && (
+        {isBoarding ? (
           <div>
             <span style={s.dateLabel}>Pick-up</span>
             <span style={s.dateVal}>{fmtDate(res.pickup_date)} · {fmtTime(res.pickup_time)}</span>
+          </div>
+        ) : (
+          // Daycare is same-day, so show the pick-up time only
+          <div>
+            <span style={s.dateLabel}>Pick-up</span>
+            <span style={s.dateVal}>{fmtTime(res.pickup_time)}</span>
           </div>
         )}
         {nights !== null && (

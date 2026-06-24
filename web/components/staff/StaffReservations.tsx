@@ -57,7 +57,9 @@ function ReservationRow({ res, color, onChanged }: { res: Reservation; color: st
       {res.dogs.length > 0 && <p style={s.dogs}>{res.dogs.join(', ')}</p>}
       <div style={s.dates}>
         <span><b style={s.dlabel}>Drop-off</b> {fmtDate(res.dropoff_date)} · {fmtTime(res.dropoff_time)}</span>
-        {isBoarding && <span><b style={s.dlabel}>Pick-up</b> {fmtDate(res.pickup_date)} · {fmtTime(res.pickup_time)}</span>}
+        {isBoarding
+          ? <span><b style={s.dlabel}>Pick-up</b> {fmtDate(res.pickup_date)} · {fmtTime(res.pickup_time)}</span>
+          : <span><b style={s.dlabel}>Pick-up</b> {fmtTime(res.pickup_time)}</span>}
         {isBoarding && <span><b style={s.dlabel}>Nights</b> {nights(res.dropoff_date, res.pickup_date)}</span>}
         <span><b style={s.dlabel}>Payment</b> {res.payment_method}</span>
       </div>
@@ -107,7 +109,8 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
     if (!rates || chosen.length === 0 || !dropDate) return
     if (service === 'boarding' && (!pickDate || pickDate <= dropDate)) return
     try {
-      const r = calculatePrice({ service_type: service, dropoff_date: dropDate, pickup_date: service === 'daycare' ? dropDate : pickDate!, dogs: chosen, payment_method: payment }, rates)
+      // Staff bypass the 14-night self-service cap (same as the staff edit flow)
+      const r = calculatePrice({ service_type: service, dropoff_date: dropDate, pickup_date: service === 'daycare' ? dropDate : pickDate!, dogs: chosen, payment_method: payment }, rates, { skipMaxStayCheck: true })
       setPrice(r.total)
     } catch (e) { if (e instanceof MaxStayExceededError) setPriceErr(e.message) }
   }, [service, dropDate, pickDate, payment, selDogs, rates]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -131,7 +134,7 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
       body: JSON.stringify({
         client_id: clientId, service_type: service,
         dropoff_date: dropDate, dropoff_time: dropTime,
-        pickup_date: service === 'daycare' ? dropDate : pickDate, pickup_time: service === 'daycare' ? dropTime : pickTime,
+        pickup_date: service === 'daycare' ? dropDate : pickDate, pickup_time: pickTime,
         payment_method: payment, dog_ids: [...selDogs], care_notes: careNotes.trim() || null,
         price_override: (overrideNum !== null && !Number.isNaN(overrideNum) && overrideNum >= 0) ? overrideNum : null,
       }),
@@ -182,9 +185,10 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
           <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} />
         )}
       </div>
+      {/* Both daycare AND boarding capture drop-off + pick-up time (matches client flow) */}
       <div style={s.fieldRow}>
         <TimePicker label="Drop-off time" value={dropTime} onChange={setDropTime} />
-        {service === 'boarding' && <TimePicker label="Pick-up time" value={pickTime} onChange={setPickTime} />}
+        <TimePicker label="Pick-up time" value={pickTime} onChange={setPickTime} />
       </div>
 
       <label style={s.flabel}>Payment

@@ -32,6 +32,14 @@ img {
   max-width: 100%;
 }
 
+/* Fully-rounded buttons site-wide. Overrides per-component inline radii.
+   Applies to <button> and button-styled <a> CTAs; harmless on plain text
+   links (no background = no visible corner change). */
+button,
+a {
+  border-radius: 9999px !important;
+}
+
 body {
   background: var(--page-bg);
   color: #111827;

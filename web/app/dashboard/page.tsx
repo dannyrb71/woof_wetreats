@@ -666,6 +666,7 @@ function MeetGreetSection({ status, record, address, onRequest }: {
   return (
     <section style={s.section}>
       <h3 style={s.sectionTitle}>Meet &amp; Greet</h3>
+      {status !== 'completed' && (
       <div style={{ ...s.mgCard, borderLeftColor: MEET_GREET_COLOR }}>
         {status === 'needed' && (
           <>
@@ -718,17 +719,21 @@ function MeetGreetSection({ status, record, address, onRequest }: {
           </>
         )}
 
-        {status === 'completed' && (
-          <>
-            <p style={s.mgLead}>✅ Meet &amp; Greet complete — you&apos;re ready to book!</p>
-            {address && (
-              <p style={s.mgSub}>
-                Our location: <strong style={{ color: '#111827' }}>{address}</strong>
-              </p>
-            )}
-          </>
-        )}
       </div>
+      )}
+      {status === 'completed' && address && (
+        <p style={s.mgLocation}>
+          Our location:{' '}
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={s.mgMapLink}
+          >
+            📍 {address}
+          </a>
+        </p>
+      )}
     </section>
   )
 }
@@ -1035,6 +1040,8 @@ const s: Record<string, React.CSSProperties> = {
   mgCard:           { background: '#fff7ed', border: '1px solid #fed7aa', borderLeft: '4px solid', borderRadius: 12, padding: '18px 22px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' },
   mgLead:           { margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: '#9a3412' },
   mgSub:            { margin: '0 0 14px', fontSize: 13, color: '#7c2d12', lineHeight: 1.6 },
+  mgLocation:       { margin: 0, fontSize: 14, color: '#374151', lineHeight: 1.6 },
+  mgMapLink:        { color: '#2563eb', fontWeight: 600, textDecoration: 'underline' },
   mgBtn:            { fontSize: 14, fontWeight: 700, padding: '10px 22px', borderRadius: 10, border: 'none', background: MEET_GREET_COLOR, color: '#fff', fontFamily: 'inherit' },
   mgReview:         { margin: '0 0 12px', fontSize: 13, color: '#7c2d12', lineHeight: 1.6 },
   mgLink:           { color: '#9a3412', fontWeight: 700, textDecoration: 'underline' },

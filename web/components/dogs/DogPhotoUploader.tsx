@@ -8,9 +8,13 @@ interface Props {
   authUid:        string
   currentPath:    string | null   // existing storage path, e.g. "{uid}/{dogId}.jpg"
   onDone:         (newPath: string, previewUrl: string) => void
+  // Folder prefix for the stored object. Clients use their auth uid (default);
+  // staff uploading on a client's behalf pass the client_id (which may have no
+  // auth login at all). The admin storage policy permits any folder.
+  pathPrefix?:    string
 }
 
-export function DogPhotoUploader({ dogId, authUid, currentPath, onDone }: Props) {
+export function DogPhotoUploader({ dogId, authUid, currentPath, onDone, pathPrefix }: Props) {
   const supabase    = createClient()
   const inputRef    = useRef<HTMLInputElement>(null)
   const [state, setState] = useState<'idle' | 'processing' | 'uploading' | 'error'>('idle')
@@ -30,7 +34,7 @@ export function DogPhotoUploader({ dogId, authUid, currentPath, onDone }: Props)
     }
 
     setState('uploading')
-    const path = `${authUid}/${dogId}.jpg`
+    const path = `${pathPrefix ?? authUid}/${dogId}.jpg`
 
     // Delete old file if it exists (prevents orphaned objects on overwrite)
     if (currentPath && currentPath !== path) {

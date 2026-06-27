@@ -13,7 +13,8 @@ interface Dog { id: string; name: string; birthdate: string }
 interface Reservation {
   id: string; service_type: 'boarding' | 'daycare'; status: string
   dropoff_date: string; dropoff_time: string; pickup_date: string; pickup_time: string
-  payment_method: string; total_price: number; care_notes: string | null; dogs: string[]
+  payment_method: string; total_price: number; price_overridden: boolean
+  care_notes: string | null; dogs: string[]; dog_ids: string[]
 }
 
 const SVC = { boarding: '#0058A0', daycare: '#C5A92B' }
@@ -28,14 +29,27 @@ function fmtTime(t: string) { if (!t) return ''; const [h, m] = t.split(':').map
 function nights(a: string, b: string) { return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000) }
 
 // ── One reservation card with cancel + edit ────────────────────
-function ReservationRow({ res, color, onChanged }: { res: Reservation; color: string; onChanged: () => void }) {
+function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
+  res: Reservation; color: string; dogs: Dog[]; blocked: Set<string>; rates: RateTable | null; onChanged: () => void
+}) {
   const supabase = createClient()
   const isBoarding = res.service_type === 'boarding'
   const st = STATUS_STYLE[res.status] ?? STATUS_STYLE.completed
 
+  const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  if (editing) {
+    return (
+      <EditReservationForm
+        res={res} dogs={dogs} blocked={blocked} rates={rates}
+        onSaved={() => { setEditing(false); onChanged() }}
+        onClose={() => setEditing(false)}
+      />
+    )
+  }
 
   async function cancel() {
     setBusy(true); setErr('')
@@ -52,7 +66,10 @@ function ReservationRow({ res, color, onChanged }: { res: Reservation; color: st
           <span style={{ ...s.svcBadge, color: SVC[res.service_type], borderColor: SVC[res.service_type] }}>{isBoarding ? '🏠 Boarding' : '🌞 Daycare'}</span>
           <span style={{ ...s.statusPill, background: st.bg, color: st.color }}>{st.label}</span>
         </div>
-        <span style={s.price}>${Number(res.total_price).toFixed(2)}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+          <span style={s.price}>${Number(res.total_price).toFixed(2)}</span>
+          {res.price_overridden && <span style={s.overrideBadge}>✎ Overridden</span>}
+        </div>
       </div>
       {res.dogs.length > 0 && <p style={s.dogs}>{res.dogs.join(', ')}</p>}
       <div style={s.dates}>
@@ -74,7 +91,10 @@ function ReservationRow({ res, color, onChanged }: { res: Reservation; color: st
               <button type="button" onClick={() => setConfirming(false)} disabled={busy} style={s.no}>Keep</button>
             </>
           ) : (
-            <button type="button" onClick={() => { setConfirming(true); setErr('') }} style={s.cancelBtn}>Cancel Reservation</button>
+            <>
+              <button type="button" onClick={() => { setEditing(true); setErr('') }} style={s.editBtn}>Edit</button>
+              <button type="button" onClick={() => { setConfirming(true); setErr('') }} style={s.cancelBtn}>Cancel Reservation</button>
+            </>
           )}
         </div>
       )}
@@ -223,6 +243,159 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
   )
 }
 
+// ── Edit an existing reservation (staff) ───────────────────────
+// Fully editable, as if setting up from scratch: service, dogs, dates, times,
+// payment, plus a manual price override. The override is held in its own state
+// and is NEVER recalculated by editing other fields — only the "Calculated
+// price" display updates live. The override only changes when staff edit the
+// override field itself.
+function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
+  res: Reservation; dogs: Dog[]; blocked: Set<string>; rates: RateTable | null
+  onSaved: () => void; onClose: () => void
+}) {
+  const supabase = createClient()
+  const [service, setService]   = useState<ServiceType>(res.service_type)
+  const [selDogs, setSelDogs]   = useState<Set<string>>(new Set(res.dog_ids))
+  const [dropDate, setDropDate] = useState<string | null>(res.dropoff_date)
+  const [pickDate, setPickDate] = useState<string | null>(res.pickup_date)
+  const [dropTime, setDropTime] = useState(fmtTime(res.dropoff_time) || '9:00 AM')
+  const [pickTime, setPickTime] = useState(fmtTime(res.pickup_time) || '5:00 PM')
+  const [payment, setPayment]   = useState<PaymentMethod>((res.payment_method as PaymentMethod) || 'cash')
+  // Prefill the override field only when this reservation already carries a
+  // staff override, so we visibly preserve it across this edit.
+  const [override, setOverride] = useState(res.price_overridden ? String(res.total_price) : '')
+  const [reason, setReason]     = useState('')
+  const [price, setPrice]       = useState<number | null>(null)
+  const [priceErr, setPriceErr] = useState('')
+  const [saving, setSaving]     = useState(false)
+  const [err, setErr]           = useState('')
+
+  const chosen = dogs.filter(d => selDogs.has(d.id))
+
+  // Live "calculated price" — for staff reference only. Does NOT touch override.
+  useEffect(() => {
+    setPriceErr(''); setPrice(null)
+    if (!rates || chosen.length === 0 || !dropDate) return
+    if (service === 'boarding' && (!pickDate || pickDate <= dropDate)) return
+    try {
+      const r = calculatePrice({ service_type: service, dropoff_date: dropDate, pickup_date: service === 'daycare' ? dropDate : pickDate!, dogs: chosen, payment_method: payment }, rates, { skipMaxStayCheck: true })
+      setPrice(r.total)
+    } catch (e) { if (e instanceof MaxStayExceededError) setPriceErr(e.message) }
+  }, [service, dropDate, pickDate, payment, selDogs, rates]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const overrideNum = override.trim() === '' ? null : Number(override)
+  const overrideValid = overrideNum !== null && !Number.isNaN(overrideNum) && overrideNum >= 0
+  const effectivePrice = overrideValid ? overrideNum : price
+  const datesChanged = dropDate !== res.dropoff_date || (service === 'boarding' && pickDate !== res.pickup_date)
+
+  async function save() {
+    setErr('')
+    if (chosen.length === 0) { setErr('Select at least one dog.'); return }
+    if (!dropDate) { setErr('Pick a drop-off date.'); return }
+    if (service === 'boarding' && (!pickDate || pickDate <= dropDate)) { setErr('Pick-up must be after drop-off.'); return }
+    if (datesChanged && !reason.trim()) { setErr('A reason is required when changing dates.'); return }
+
+    setSaving(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { setErr('Session expired — refresh.'); setSaving(false); return }
+
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/update-reservation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        reservation_id: res.id, service_type: service,
+        dropoff_date: dropDate, dropoff_time: dropTime,
+        pickup_date: service === 'daycare' ? dropDate : pickDate, pickup_time: pickTime,
+        payment_method: payment, dog_ids: [...selDogs],
+        reason: reason.trim() || undefined,
+        // null → recalculate (clears any prior override); number → set/keep override
+        price_override: overrideValid ? overrideNum : null,
+      }),
+    })
+    const json = await resp.json().catch(() => ({}))
+    setSaving(false)
+    if (!resp.ok) { setErr(json.error ?? 'Could not save changes.'); return }
+    onSaved()
+  }
+
+  return (
+    <div style={s.form}>
+      <div style={s.formHead}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Edit Reservation</h3>
+        <button type="button" onClick={onClose} style={s.no}>Close</button>
+      </div>
+
+      <div style={s.fieldRow}>
+        {(['boarding', 'daycare'] as const).map(sv => (
+          <button key={sv} type="button" onClick={() => setService(sv)}
+            style={{ ...s.toggleBtn, background: service === sv ? SVC[sv] : '#fff', color: service === sv ? '#fff' : '#374151', borderColor: service === sv ? SVC[sv] : '#e5e7eb' }}>
+            {sv === 'boarding' ? '🏠 Boarding' : '🌞 Daycare'}
+          </button>
+        ))}
+      </div>
+
+      <p style={s.flabel}>Dogs</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {dogs.length === 0 && <span style={{ fontSize: 13, color: '#9ca3af' }}>This client has no dogs on file.</span>}
+        {dogs.map(d => {
+          const on = selDogs.has(d.id)
+          return (
+            <button key={d.id} type="button" onClick={() => setSelDogs(prev => { const n = new Set(prev); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n })}
+              style={{ ...s.dogChip, background: on ? '#eff6ff' : '#fff', borderColor: on ? '#2563eb' : '#e5e7eb', color: on ? '#1d4ed8' : '#374151' }}>
+              {on ? '✓ ' : ''}{d.name}
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={s.pickerRow}>
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} />
+        {service === 'boarding' && (
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} />
+        )}
+      </div>
+      <div style={s.fieldRow}>
+        <TimePicker label="Drop-off time" value={dropTime} onChange={setDropTime} />
+        <TimePicker label="Pick-up time" value={pickTime} onChange={setPickTime} />
+      </div>
+
+      <label style={s.flabel}>Payment
+        <select value={payment} onChange={e => setPayment(e.target.value as PaymentMethod)} style={s.input}>
+          <option value="cash">💵 Cash</option>
+          <option value="venmo">💙 Venmo</option>
+        </select>
+      </label>
+
+      {datesChanged && (
+        <label style={s.flabel}>Reason for date change (required)
+          <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. client requested new dates" style={s.input} />
+        </label>
+      )}
+
+      <div style={s.priceBox}>
+        {priceErr ? <span style={{ color: '#ef4444', fontSize: 13 }}>{priceErr}</span> : (
+          <>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>Calculated price: <b style={{ color: '#111827' }}>{price != null ? `$${price.toFixed(2)}` : '—'}</b></span>
+            <label style={{ ...s.flabel, marginTop: 8 }}>Override price (optional)
+              <input type="number" min="0" step="1" value={override} onChange={e => setOverride(e.target.value)} placeholder="leave blank to use calculated" style={s.input} />
+            </label>
+            {overrideValid
+              ? <span style={s.overrideTag}>✎ Manual override — won&apos;t be recalculated</span>
+              : <span style={{ fontSize: 12, color: '#9ca3af' }}>Blank = system-calculated price.</span>}
+            {effectivePrice != null && <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Will charge: ${Number(effectivePrice).toFixed(2)}</span>}
+          </>
+        )}
+      </div>
+
+      {err && <p style={{ margin: 0, fontSize: 13, color: '#ef4444' }}>{err}</p>}
+      <button type="button" onClick={save} disabled={saving}
+        style={{ ...s.submit, opacity: saving ? 0.5 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+        {saving ? 'Saving…' : 'Save Changes'}
+      </button>
+    </div>
+  )
+}
+
 // ── Section wrapper: loads everything, renders list + new form ──
 export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChanged }: {
   clientId: string; dogs: Dog[]; meetGreetCompleted: boolean; onChanged?: () => void
@@ -237,7 +410,7 @@ export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChange
   const load = useCallback(async () => {
     const [resR, bdR, rtR] = await Promise.all([
       supabase.from('reservations')
-        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, care_notes')
+        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, price_overridden, care_notes')
         .eq('client_id', clientId).order('dropoff_date', { ascending: false }),
       supabase.from('blocked_dates').select('date'),
       supabase.rpc('get_pricing_rates'),
@@ -248,15 +421,17 @@ export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChange
     const rows = resR.data ?? []
     const ids = rows.map(r => r.id)
     const dogMap: Record<string, string[]> = {}
+    const dogIdMap: Record<string, string[]> = {}
     if (ids.length) {
-      const { data: rd } = await supabase.from('reservation_dogs').select('reservation_id, dogs(name)').in('reservation_id', ids)
+      const { data: rd } = await supabase.from('reservation_dogs').select('reservation_id, dog_id, dogs(name)').in('reservation_id', ids)
       for (const row of rd ?? []) {
+        ;(dogIdMap[row.reservation_id] ??= []).push(row.dog_id)
         const nm = (Array.isArray(row.dogs) ? row.dogs[0] : row.dogs)?.name
         if (!nm) continue
         ;(dogMap[row.reservation_id] ??= []).push(nm)
       }
     }
-    setReservations(rows.map(r => ({ ...r, dogs: dogMap[r.id] ?? [] })) as Reservation[])
+    setReservations(rows.map(r => ({ ...r, dogs: dogMap[r.id] ?? [], dog_ids: dogIdMap[r.id] ?? [] })) as Reservation[])
     setLoading(false)
   }, [clientId, supabase])
 
@@ -282,7 +457,7 @@ export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChange
 
       {loading ? <p style={{ fontSize: 13, color: '#9ca3af' }}>Loading…</p>
         : reservations.length === 0 ? <p style={{ fontSize: 13, color: '#9ca3af' }}>No reservations yet.</p>
-        : reservations.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} onChanged={afterChange} />)}
+        : reservations.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} dogs={dogs} blocked={blocked} rates={rates} onChanged={afterChange} />)}
     </div>
   )
 }
@@ -302,7 +477,10 @@ const s: Record<string, React.CSSProperties> = {
   dlabel:       { color: '#9ca3af', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', marginRight: 6 },
   care:         { margin: '8px 0 0', fontSize: 13, color: '#6b7280', fontStyle: 'italic', background: '#f9fafb', borderRadius: 6, padding: '6px 10px' },
   actions:      { marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  editBtn:      { fontSize: 12, fontWeight: 600, color: '#374151', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   cancelBtn:    { fontSize: 12, fontWeight: 600, color: '#be123c', background: '#fff', border: '1px solid #fecdd3', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
+  overrideBadge:{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' },
+  overrideTag:  { fontSize: 12, fontWeight: 600, color: '#92400e' },
   yes:          { fontSize: 12, fontWeight: 600, color: '#fff', background: '#be123c', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   no:           { fontSize: 12, fontWeight: 600, color: '#374151', background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   form:         { background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 12, padding: '18px 20px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 },

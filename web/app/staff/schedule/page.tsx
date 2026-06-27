@@ -6,6 +6,7 @@ import { COLORS } from '@/components/staff/HouseholdCard'
 import type { Household, DogRow } from '@/components/staff/HouseholdCard'
 import { HouseholdDetail } from '@/components/staff/HouseholdDetail'
 import { DogAvatar } from '@/components/staff/DogAvatar'
+import { ManualBookingForm } from '@/components/staff/ManualBookingForm'
 import { SiteNav } from '@/components/SiteNav'
 
 // ── Types ──────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ interface ScheduleRow {
   pickup_time:    string | null
   dropoff_date:   string | null
   pickup_date:    string | null
+  care_notes:     string | null
+  completed:      boolean
   dogs:           ScheduleDog[]
 }
 
@@ -84,10 +87,27 @@ function DogList({ dogs }: { dogs: ScheduleDog[] }) {
   )
 }
 
+// ── Care-notes one-line preview ────────────────────────────────
+// Signals "there are notes here" without showing the full content. Clicking it
+// falls through to the row's onClick, which opens the existing household detail
+// modal (full care notes live there). Omitted entirely when none on file.
+function CareNotesPreview({ notes }: { notes: string | null }) {
+  if (!notes || !notes.trim()) return null
+  const oneLine = notes.replace(/\s+/g, ' ').trim()
+  return <p style={s.carePreview}>📋 {oneLine}</p>
+}
+
 // ── Activity row ───────────────────────────────────────────────
-function ActivityRow({ row, onOpen }: { row: ScheduleRow; onOpen: (clientId: string) => void }) {
+function ActivityRow({ row, onOpen, onToggle }: {
+  row: ScheduleRow
+  onOpen: (clientId: string) => void
+  onToggle: (row: ScheduleRow, next: boolean) => void
+}) {
   const a = ACTIVITY[row.activity_type]
   const [hovered, setHovered] = useState(false)
+  // Completion toggles apply only to "Activity on this date" items (group 1).
+  const togglable = row.group_num === 1
+  const done = row.completed
   return (
     <div
       role="button"
@@ -98,8 +118,10 @@ function ActivityRow({ row, onOpen }: { row: ScheduleRow; onOpen: (clientId: str
       onMouseLeave={() => setHovered(false)}
       style={{
         ...s.row,
-        borderLeftColor: a.color,
+        borderLeftColor: done ? '#d1d5db' : a.color,
         cursor: 'pointer',
+        opacity: done ? 0.6 : 1,
+        background: done ? '#f9fafb' : '#fff',
         boxShadow: hovered ? '0 6px 20px rgba(0,0,0,0.10)' : '0 1px 3px rgba(0,0,0,0.05)',
         transform: hovered ? 'translateY(-1px)' : 'none',
         transition: 'all 0.15s ease',
@@ -107,7 +129,17 @@ function ActivityRow({ row, onOpen }: { row: ScheduleRow; onOpen: (clientId: str
     >
       <div style={s.rowTop}>
         <div style={s.rowLeft}>
-          <span style={{ ...s.activityBadge, color: a.color, borderColor: a.color }}>{a.label}</span>
+          {togglable && (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={done}
+              aria-label={done ? 'Mark not done' : 'Mark done'}
+              onClick={e => { e.stopPropagation(); onToggle(row, !done) }}
+              style={{ ...s.check, background: done ? '#16a34a' : '#fff', borderColor: done ? '#16a34a' : '#d1d5db', color: done ? '#fff' : 'transparent' }}
+            >✓</button>
+          )}
+          <span style={{ ...s.activityBadge, color: done ? '#9ca3af' : a.color, borderColor: done ? '#d1d5db' : a.color, textDecoration: done ? 'line-through' : 'none' }}>{a.label}</span>
           {row.activity_type === 'daycare'
             ? <span style={s.time}>{fmtTime(row.event_time)}{row.pickup_time ? ` → ${fmtTime(row.pickup_time)}` : ''}</span>
             : (row.event_time && <span style={s.time}>{fmtTime(row.event_time)}</span>)}
@@ -122,6 +154,7 @@ function ActivityRow({ row, onOpen }: { row: ScheduleRow; onOpen: (clientId: str
           )}
         </div>
       </div>
+      <CareNotesPreview notes={row.care_notes} />
       <DogList dogs={row.dogs} />
     </div>
   )
@@ -165,6 +198,14 @@ export default function SchedulePage() {
   const [error,   setError]   = useState('')
   const [selected,    setSelected]    = useState<Household | null>(null)
   const [openingId,   setOpeningId]   = useState<string | null>(null)
+  const [manualEnabled, setManualEnabled] = useState(false)
+  const [showManual,    setShowManual]    = useState(false)
+
+  // Whether the manual-booking feature is switched on in Settings.
+  useEffect(() => {
+    supabase.from('app_settings').select('value').eq('key', 'manual_booking_enabled').maybeSingle()
+      .then(({ data }) => setManualEnabled(data?.value === 'true'))
+  }, [supabase])
 
   const load = useCallback(async (d: string) => {
     setLoading(true)
@@ -233,13 +274,45 @@ export default function SchedulePage() {
     setOpeningId(null)
   }, [supabase])
 
+  // Toggle a schedule item complete/incomplete. Meet & Greet uses the dedicated
+  // RPCs so its completion correctly drives clients.meet_greet_status (and thus
+  // the client dashboard); other items use the generic completion table.
+  const toggleComplete = useCallback(async (row: ScheduleRow, next: boolean) => {
+    const matches = (r: ScheduleRow) =>
+      row.activity_type === 'meet_greet'
+        ? r.meet_greet_id === row.meet_greet_id
+        : r.reservation_id === row.reservation_id && r.activity_type === row.activity_type
+    // Optimistic update
+    setRows(prev => prev.map(r => matches(r) ? { ...r, completed: next } : r))
+
+    let error
+    if (row.activity_type === 'meet_greet' && row.meet_greet_id) {
+      const fn = next ? 'complete_meet_greet' : 'reopen_meet_greet'
+      ;({ error } = await supabase.rpc(fn, { p_meet_greet_id: row.meet_greet_id }))
+    } else if (row.reservation_id) {
+      ;({ error } = await supabase.rpc('set_schedule_item_complete', {
+        p_reservation_id: row.reservation_id, p_activity_type: row.activity_type, p_date: date, p_complete: next,
+      }))
+    }
+    if (error) {
+      // Revert on failure
+      setRows(prev => prev.map(r => matches(r) ? { ...r, completed: !next } : r))
+      setError('Could not update — try again.')
+    }
+  }, [supabase, date])
+
   function closeModal() {
     setSelected(null)
     // Reflect any edits made in the modal (dates, M&G, etc.) without losing the date
     load(date)
   }
 
+  // Within "Activity on this date", completed items sink to the bottom but stay
+  // visible (stable sort preserves the RPC's time ordering otherwise).
   const group1 = rows.filter(r => r.group_num === 1)
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (a.r.completed === b.r.completed) ? a.i - b.i : (a.r.completed ? 1 : -1))
+    .map(x => x.r)
   const group2 = rows.filter(r => r.group_num === 2)
 
   return (
@@ -248,6 +321,12 @@ export default function SchedulePage() {
 
       <main style={s.main}>
         <h2 style={s.pageHeading}>Daily Schedule</h2>
+        {/* ── Manual booking (only when enabled in Settings) ── */}
+        {manualEnabled && (
+          <div style={{ textAlign: 'center', marginBottom: 14 }}>
+            <button type="button" onClick={() => setShowManual(true)} style={s.manualBtn}>+ Manual Booking</button>
+          </div>
+        )}
         {/* ── Date picker ── */}
         <div style={s.dateBar}>
           <button type="button" onClick={() => setDate(d => shiftDate(d, -1))} style={s.navBtn} aria-label="Previous day">‹</button>
@@ -279,7 +358,7 @@ export default function SchedulePage() {
               <h2 style={s.groupTitle}>Activity on this date</h2>
               {group1.length === 0
                 ? <p style={s.muted}>No arrivals, departures, daycare, or Meet &amp; Greets today.</p>
-                : group1.map((r, i) => <ActivityRow key={`${r.activity_type}-${r.reservation_id ?? r.meet_greet_id}-${i}`} row={r} onOpen={openHousehold} />)
+                : group1.map((r, i) => <ActivityRow key={`${r.activity_type}-${r.reservation_id ?? r.meet_greet_id}-${i}`} row={r} onOpen={openHousehold} onToggle={toggleComplete} />)
               }
             </section>
 
@@ -291,7 +370,7 @@ export default function SchedulePage() {
               <h2 style={{ ...s.groupTitle, color: '#9ca3af' }}>In progress · no activity today</h2>
               {group2.length === 0
                 ? <p style={s.muted}>No ongoing stays without activity today.</p>
-                : group2.map((r, i) => <ActivityRow key={`ip-${r.reservation_id}-${i}`} row={r} onOpen={openHousehold} />)
+                : group2.map((r, i) => <ActivityRow key={`ip-${r.reservation_id}-${i}`} row={r} onOpen={openHousehold} onToggle={toggleComplete} />)
               }
             </section>
           </>
@@ -304,6 +383,17 @@ export default function SchedulePage() {
 
       {selected && (
         <HouseholdModal household={selected} onClose={closeModal} onUpdate={setSelected} />
+      )}
+
+      {showManual && (
+        <div style={s.overlay} onClick={() => setShowManual(false)} role="dialog" aria-modal="true" aria-label="Manual booking">
+          <div style={{ maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
+            <ManualBookingForm
+              onClose={() => setShowManual(false)}
+              onCreated={() => { setShowManual(false); load(date) }}
+            />
+          </div>
+        </div>
       )}
     </div>
   )
@@ -321,6 +411,7 @@ const s: Record<string, React.CSSProperties> = {
   dateInput:   { fontSize: 14, padding: '7px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', cursor: 'pointer' },
   dateLong:    { margin: '6px 0 0', fontSize: 14, fontWeight: 700, color: '#111827' },
   todayBtn:    { fontSize: 12, fontWeight: 600, color: '#2563eb', background: '#fff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '5px 14px', cursor: 'pointer', fontFamily: 'inherit' },
+  manualBtn:   { fontSize: 13, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontFamily: 'inherit' },
 
   section:     { display: 'flex', flexDirection: 'column', gap: 12 },
   groupTitle:  { margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' },
@@ -335,6 +426,9 @@ const s: Record<string, React.CSSProperties> = {
   rowClient:   { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0 },
   clientName:  { fontSize: 14, fontWeight: 700, color: '#111827' },
   phone:       { fontSize: 12, color: '#2563eb', textDecoration: 'none' },
+
+  check:       { width: 22, height: 22, borderRadius: '50%', border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1 },
+  carePreview: { margin: '0 0 8px', fontSize: 12, color: '#6b7280', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
 
   dogRow:      { display: 'flex', flexWrap: 'wrap', gap: 12 },
   noDogs:      { fontSize: 13, color: '#9ca3af' },

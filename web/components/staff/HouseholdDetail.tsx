@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { COLORS, Household, DogRow, monthsOld, fmtDate, fmtTime } from './HouseholdCard'
 import { StaffReservations } from './StaffReservations'
+import { DogPhotoUploader } from '@/components/dogs/DogPhotoUploader'
 
 // 30-minute time slots (7:00 AM – 8:00 PM). Value is 24h "HH:MM" for the DB;
 // label is the friendly 12h form. Only :00 and :30 are selectable.
@@ -283,6 +284,10 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   // Client detail (lazy-loaded)
   const [detail, setDetail] = useState<ClientDetail | null>(null)
 
+  // Staff-uploaded dog photos: immediate-preview overrides keyed by dog id.
+  // (Staff upload on the client's behalf when a client hasn't added a photo.)
+  const [photoOverrides, setPhotoOverrides] = useState<Record<string, string>>({})
+
   // Staff notes
   const [note,    setNote]    = useState(household.staff_note ?? '')
   const [saved,   setSaved]   = useState(true)
@@ -496,10 +501,11 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
           <div style={s.dogGrid}>
             {household.dogs.map((dog: DogRow) => {
               const isPuppy = monthsOld(dog.birthdate) < 12
+              const shownPhoto = photoOverrides[dog.id] ?? dog.photoSigned
               return (
                 <div key={dog.id} style={{ ...s.dogCard, borderColor: color }}>
-                  {dog.photoSigned
-                    ? <img src={dog.photoSigned} alt={dog.name} style={s.dogPhoto} />
+                  {shownPhoto
+                    ? <img src={shownPhoto} alt={dog.name} style={s.dogPhoto} />
                     : <div style={s.dogAvatar}>🐕</div>
                   }
                   <p style={s.dogCardName}>{dog.name}</p>
@@ -509,6 +515,23 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
                     : <p style={{ ...s.dogGender, color: '#f59e0b' }}>Gender not set</p>
                   }
                   {isPuppy && <span style={s.puppyBadge}>🐾 Puppy</span>}
+                  {/* Staff can add/replace a dog's photo when the client hasn't.
+                      Reuses the client-side compress+upload pipeline; stored under
+                      the client_id folder (admin storage policy permits it). */}
+                  <DogPhotoUploader
+                    dogId={dog.id}
+                    authUid={household.client_id}
+                    pathPrefix={household.client_id}
+                    currentPath={dog.photo_url ?? null}
+                    onDone={(newPath, previewUrl) => {
+                      setPhotoOverrides(prev => ({ ...prev, [dog.id]: previewUrl }))
+                      onUpdate({
+                        ...household,
+                        dogs: household.dogs.map((d: DogRow) =>
+                          d.id === dog.id ? { ...d, photo_url: newPath, photoSigned: previewUrl } : d),
+                      })
+                    }}
+                  />
                 </div>
               )
             })}

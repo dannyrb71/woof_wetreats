@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { VENMO_USERNAME } from '@/lib/payment'
 
 interface Reservation {
   id:             string
@@ -150,7 +151,9 @@ function ConfirmationContent() {
           <div style={s.detailRow}>
             <span style={s.detailLabel}>Payment</span>
             <span style={s.detailValue}>
-              {reservation.payment_method === 'cash' ? '💵 Cash' : '💙 Venmo'}
+              {reservation.payment_method === 'cash'
+                ? '💵 Cash'
+                : <>💙 Venmo · <strong>{VENMO_USERNAME}</strong></>}
             </span>
           </div>
 

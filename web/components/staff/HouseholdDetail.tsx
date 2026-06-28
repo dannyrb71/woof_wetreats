@@ -487,6 +487,7 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
         <div style={s.sectionCard}>
           <StaffReservations
             clientId={household.client_id}
+            clientFirstName={household.first_name}
             dogs={household.dogs.map((d: DogRow) => ({ id: d.id, name: d.name, birthdate: d.birthdate }))}
             meetGreetCompleted={mgStatus === 'completed'}
             onChanged={() => onUpdate(household)}

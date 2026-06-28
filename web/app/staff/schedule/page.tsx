@@ -108,6 +108,20 @@ function ActivityRow({ row, onOpen, onToggle }: {
   // Completion toggles apply only to "Activity on this date" items (group 1).
   const togglable = row.group_num === 1
   const done = row.completed
+  // A completed BOARDING ARRIVAL is special: the dog hasn't left, the stay has
+  // just started. It must NOT gray out — it turns green and renders in the
+  // In Progress group. (Daycare/departure/meet_greet keep the gray "done" look.)
+  const startedStay = row.activity_type === 'arrival' && done
+  const grayed = done && !startedStay
+  const accent = startedStay ? IN_PROGRESS_COLOR : a.color
+  // When started, present it like an in-progress overnight stay.
+  const badgeLabel = startedStay ? ACTIVITY.in_progress.label : a.label
+  const showSpan = (row.activity_type === 'in_progress' || startedStay) && row.dropoff_date && row.pickup_date
+  // Long-stay flag: boarding stays over 14 nights need a custom flat rate.
+  const nights = row.dropoff_date && row.pickup_date
+    ? Math.round((new Date(row.pickup_date + 'T00:00:00').getTime() - new Date(row.dropoff_date + 'T00:00:00').getTime()) / 86400000)
+    : 0
+  const longStay = row.service_type === 'boarding' && nights > 14
   return (
     <div
       role="button"
@@ -118,10 +132,10 @@ function ActivityRow({ row, onOpen, onToggle }: {
       onMouseLeave={() => setHovered(false)}
       style={{
         ...s.row,
-        borderLeftColor: done ? '#d1d5db' : a.color,
+        borderLeftColor: grayed ? '#d1d5db' : accent,
         cursor: 'pointer',
-        opacity: done ? 0.6 : 1,
-        background: done ? '#f9fafb' : '#fff',
+        opacity: grayed ? 0.6 : 1,
+        background: grayed ? '#f9fafb' : '#fff',
         boxShadow: hovered ? '0 6px 20px rgba(0,0,0,0.10)' : '0 1px 3px rgba(0,0,0,0.05)',
         transform: hovered ? 'translateY(-1px)' : 'none',
         transition: 'all 0.15s ease',
@@ -136,15 +150,16 @@ function ActivityRow({ row, onOpen, onToggle }: {
               aria-checked={done}
               aria-label={done ? 'Mark not done' : 'Mark done'}
               onClick={e => { e.stopPropagation(); onToggle(row, !done) }}
-              style={{ ...s.check, background: done ? '#16a34a' : '#fff', borderColor: done ? '#16a34a' : '#d1d5db', color: done ? '#fff' : 'transparent' }}
+              style={{ ...s.check, background: done ? (startedStay ? IN_PROGRESS_COLOR : '#16a34a') : '#fff', borderColor: done ? (startedStay ? IN_PROGRESS_COLOR : '#16a34a') : '#d1d5db', color: done ? '#fff' : 'transparent' }}
             >✓</button>
           )}
-          <span style={{ ...s.activityBadge, color: done ? '#9ca3af' : a.color, borderColor: done ? '#d1d5db' : a.color, textDecoration: done ? 'line-through' : 'none' }}>{a.label}</span>
-          {row.activity_type === 'daycare'
+          <span style={{ ...s.activityBadge, color: grayed ? '#9ca3af' : accent, borderColor: grayed ? '#d1d5db' : accent, textDecoration: grayed ? 'line-through' : 'none' }}>{badgeLabel}</span>
+          {longStay && <span style={s.longStayBadge} title="Stay over 14 nights — confirm custom flat rate">🌙 Long stay</span>}
+          {!startedStay && (row.activity_type === 'daycare'
             ? <span style={s.time}>{fmtTime(row.event_time)}{row.pickup_time ? ` → ${fmtTime(row.pickup_time)}` : ''}</span>
-            : (row.event_time && <span style={s.time}>{fmtTime(row.event_time)}</span>)}
-          {row.activity_type === 'in_progress' && row.dropoff_date && row.pickup_date && (
-            <span style={s.spanDates}>{fmtDateShort(row.dropoff_date)} → {fmtDateShort(row.pickup_date)}</span>
+            : (row.event_time && <span style={s.time}>{fmtTime(row.event_time)}</span>))}
+          {showSpan && (
+            <span style={s.spanDates}>{fmtDateShort(row.dropoff_date!)} → {fmtDateShort(row.pickup_date!)}</span>
           )}
         </div>
         <div style={s.rowClient}>
@@ -307,13 +322,19 @@ export default function SchedulePage() {
     load(date)
   }
 
+  // A completed boarding arrival = a stay that just started → it leaves
+  // "Activity on this date" and joins the In Progress group (green), not the
+  // grayed bottom of group 1.
+  const isStartedArrival = (r: ScheduleRow) => r.activity_type === 'arrival' && r.completed
+
   // Within "Activity on this date", completed items sink to the bottom but stay
   // visible (stable sort preserves the RPC's time ordering otherwise).
-  const group1 = rows.filter(r => r.group_num === 1)
+  const group1 = rows.filter(r => r.group_num === 1 && !isStartedArrival(r))
     .map((r, i) => ({ r, i }))
     .sort((a, b) => (a.r.completed === b.r.completed) ? a.i - b.i : (a.r.completed ? 1 : -1))
     .map(x => x.r)
-  const group2 = rows.filter(r => r.group_num === 2)
+  // In Progress = just-started arrivals first, then ongoing stays with no activity.
+  const group2 = [...rows.filter(isStartedArrival), ...rows.filter(r => r.group_num === 2)]
 
   return (
     <div style={s.page}>
@@ -367,10 +388,10 @@ export default function SchedulePage() {
 
             {/* ── Group 2: in progress, no activity ── */}
             <section style={s.section}>
-              <h2 style={{ ...s.groupTitle, color: '#9ca3af' }}>In progress · no activity today</h2>
+              <h2 style={{ ...s.groupTitle, color: '#9ca3af' }}>In progress · staying overnight</h2>
               {group2.length === 0
-                ? <p style={s.muted}>No ongoing stays without activity today.</p>
-                : group2.map((r, i) => <ActivityRow key={`ip-${r.reservation_id}-${i}`} row={r} onOpen={openHousehold} onToggle={toggleComplete} />)
+                ? <p style={s.muted}>No dogs currently staying overnight.</p>
+                : group2.map((r, i) => <ActivityRow key={`ip-${r.activity_type}-${r.reservation_id}-${i}`} row={r} onOpen={openHousehold} onToggle={toggleComplete} />)
               }
             </section>
           </>
@@ -429,6 +450,7 @@ const s: Record<string, React.CSSProperties> = {
 
   check:       { width: 22, height: 22, borderRadius: '50%', border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1 },
   carePreview: { margin: '0 0 8px', fontSize: 12, color: '#6b7280', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
+  longStayBadge: { fontSize: 11, fontWeight: 700, color: '#fff', background: '#7c3aed', borderRadius: 20, padding: '3px 9px', whiteSpace: 'nowrap' },
 
   dogRow:      { display: 'flex', flexWrap: 'wrap', gap: 12 },
   noDogs:      { fontSize: 13, color: '#9ca3af' },

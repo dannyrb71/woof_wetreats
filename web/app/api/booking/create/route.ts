@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { calculatePrice, MaxStayExceededError } from '@/lib/pricing-engine'
+import { calculatePrice } from '@/lib/pricing-engine'
 import type { PaymentMethod, ServiceType, RateTable } from '@/lib/pricing-engine'
 import { TERMS_VERSION } from '@/lib/terms'
 
@@ -186,10 +186,9 @@ export async function POST(req: NextRequest) {
       payment_method,
     }, rates as RateTable)
     serverPrice = result.total
-  } catch (e) {
-    if (e instanceof MaxStayExceededError) {
-      return NextResponse.json({ error: e.message }, { status: 422 })
-    }
+  } catch {
+    // Long stays (>14 nights) are no longer blocked — they price normally on the
+    // extended rate. Any throw here is a genuine calculation failure.
     return NextResponse.json({ error: 'Pricing calculation failed' }, { status: 500 })
   }
 

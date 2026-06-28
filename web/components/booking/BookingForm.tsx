@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { calculatePrice, MaxStayExceededError } from '@/lib/pricing-engine'
+import { calculatePrice } from '@/lib/pricing-engine'
 import type { PricingResult, PaymentMethod, ServiceType, RateTable } from '@/lib/pricing-engine'
 import DatePicker from './DatePicker'
 import TimePicker from './TimePicker'
@@ -82,14 +82,10 @@ export default function BookingForm() {
     if (service === 'boarding') {
       if (!dropoffDate || !pickupDate) return
       if (pickupDate <= dropoffDate) return
-      try {
-        setPricing(calculatePrice({
-          service_type: 'boarding', dropoff_date: dropoffDate,
-          pickup_date: pickupDate, dogs: chosenDogs, payment_method: payment,
-        }, rates))
-      } catch (e) {
-        if (e instanceof MaxStayExceededError) setPricingError(e.message)
-      }
+      setPricing(calculatePrice({
+        service_type: 'boarding', dropoff_date: dropoffDate,
+        pickup_date: pickupDate, dogs: chosenDogs, payment_method: payment,
+      }, rates))
     } else {
       if (!dropoffDate) return
       setPricing(calculatePrice({
@@ -309,6 +305,13 @@ export default function BookingForm() {
                 {pricing.is_extended ? ' · Extended stay rate' : ''}
               </p>
             )}
+            {pricing.total_nights > 14 && (
+              <p style={s.longStayNote}>
+                🌙 For stays over 14 days, we offer a custom flat rate — we&apos;ll reach out to
+                confirm pricing, or feel free to text us in the meantime. The amount above is an
+                estimate for now.
+              </p>
+            )}
             <div style={s.breakdown}>
               {pricing.breakdown.slice(0, 5).map((p, i) => (
                 <div key={i} style={s.breakdownRow}>
@@ -380,6 +383,7 @@ const s: Record<string, React.CSSProperties> = {
   totalLabel:    { fontWeight: 600, fontSize: 15, color: '#111827' },
   totalAmount:   { fontWeight: 700, fontSize: 24, color: '#2563eb' },
   priceDetail:   { margin: '2px 0 8px', fontSize: 12, color: '#6b7280' },
+  longStayNote:  { margin: '2px 0 10px', fontSize: 12.5, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 },
   breakdown:     { borderTop: '1px solid #e5e7eb', paddingTop: 8, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 },
   breakdownRow:  { display: 'flex', justifyContent: 'space-between' },
   rateTag:       { background: '#e5e7eb', color: '#374151', fontSize: 10, padding: '1px 5px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase' },

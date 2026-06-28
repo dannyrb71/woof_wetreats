@@ -58,7 +58,6 @@ export class MaxStayExceededError extends Error {
 // =============================================================
 // Business rules (NOT editable — these are logic, not dollar amounts)
 // =============================================================
-const MAX_NIGHTS          = 14
 const EXTENDED_THRESHOLD  = 8
 
 // =============================================================
@@ -230,9 +229,12 @@ export function calculatePrice(input: PricingInput, rates: RateTable, options: P
   const pickup       = parseDate(pickup_date)
   const total_nights = diffDays(dropoff, pickup)
 
-  if (total_nights > MAX_NIGHTS && !options.skipMaxStayCheck) {
-    throw new MaxStayExceededError(total_nights)
-  }
+  // The former 14-night hard cap was removed (Batch 3). Long stays now price
+  // normally on the regular/extended/holiday engine; the UI surfaces a
+  // custom-flat-rate note and staff can override the total afterwards.
+  // `options.skipMaxStayCheck` is retained for call-site compatibility but is
+  // now a no-op.
+  void options.skipMaxStayCheck
 
   const is_extended  = total_nights >= EXTENDED_THRESHOLD
   const holidaySet   = buildHolidaySet(dropoff_date, pickup_date)

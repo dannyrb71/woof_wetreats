@@ -38,12 +38,15 @@ interface Props {
   rangeEnd?:    string | null
   // Minimum selectable date (defaults to today)
   minDate?:     string
+  // Staff-only: allow selecting past dates (back-dating for record-keeping).
+  // An explicit minDate still applies (e.g. pickup must be ≥ drop-off).
+  allowPast?:   boolean
 }
 
 // ── Component ──────────────────────────────────────────────────
-export default function DatePicker({ label, value, onChange, blockedDates, rangeStart, rangeEnd, minDate }: Props) {
+export default function DatePicker({ label, value, onChange, blockedDates, rangeStart, rangeEnd, minDate, allowPast }: Props) {
   const todayStr  = today()
-  const minStr    = minDate ?? todayStr
+  const minStr    = minDate ?? (allowPast ? '0000-01-01' : todayStr)
 
   // Start calendar view on the month containing the selected date,
   // or the current month if nothing is selected.

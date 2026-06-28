@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { DogPhotoUploader } from '@/components/dogs/DogPhotoUploader'
 import { processImageFile, ImageValidationError } from '@/lib/image-utils'
 import { TERMS_VERSION } from '@/lib/terms'
+import { VENMO_USERNAME } from '@/lib/payment'
 import { SiteNav } from '@/components/SiteNav'
 
 // ── Types ──────────────────────────────────────────────────────
@@ -47,8 +48,15 @@ interface Reservation {
   pickup_time:    string
   payment_method: string
   total_price:    number
+  paid:           boolean
   care_notes:     string | null
   dogs:           string[]
+}
+
+interface ClientNotification {
+  id:         string
+  message:    string
+  created_at: string
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -590,6 +598,9 @@ function ReservationCard({ res, onCancel }: { res: Reservation; onCancel: (id: s
             {isBoarding ? '🏠 Boarding' : '🌞 Daycare'}
           </span>
           <StatusBadge status={res.status} />
+          {res.status !== 'cancelled' && (
+            <span style={res.paid ? s.paidBadge : s.unpaidBadge}>{res.paid ? '✅ Paid' : '● Unpaid'}</span>
+          )}
         </div>
         <span style={s.resPrice}>${Number(res.total_price).toFixed(2)}</span>
       </div>
@@ -618,10 +629,18 @@ function ReservationCard({ res, onCancel }: { res: Reservation; onCancel: (id: s
           </div>
         )}
       </div>
+      {nights !== null && nights > 14 && (
+        <p style={s.longStayNote}>
+          🌙 Stays over 14 days get a custom flat rate — we&apos;ll reach out to confirm pricing.
+          The total above is an estimate for now.
+        </p>
+      )}
       {res.care_notes && <p style={s.careNotes}>📋 {res.care_notes}</p>}
       <div style={s.resMeta}>
         <span style={s.metaItem}>#{res.id.slice(0, 8).toUpperCase()}</span>
-        <span style={s.metaItem}>{res.payment_method === 'cash' ? '💵 Cash' : '💙 Venmo'}</span>
+        <span style={s.metaItem}>
+          {res.payment_method === 'cash' ? '💵 Cash' : <>💙 Venmo · <span style={s.venmoHandle}>{VENMO_USERNAME}</span></>}
+        </span>
       </div>
       {res.status === 'upcoming' && (
         <div style={s.cancelRow}>
@@ -738,6 +757,95 @@ function MeetGreetSection({ status, record, address, onRequest }: {
   )
 }
 
+// ── Balance summary (Item 3, revised) ──────────────────────────
+// Shows the single most recent PAID service, plus every unpaid reservation
+// grouped + totaled by payment method (cash vs Venmo). Cancelled never counts.
+function svcLabel(t: string) { return t === 'boarding' ? '🏠 Boarding' : '🌞 Daycare' }
+function resDatesLabel(r: Reservation): string {
+  return r.service_type === 'boarding'
+    ? `${fmtDate(r.dropoff_date)} – ${fmtDate(r.pickup_date)}`
+    : fmtDate(r.dropoff_date)
+}
+
+function BalanceSummary({ reservations }: { reservations: Reservation[] }) {
+  const billable = reservations.filter(r => r.status !== 'cancelled')
+  const unpaid   = billable.filter(r => !r.paid)
+  const sum = (list: Reservation[]) => list.reduce((t, r) => t + Number(r.total_price), 0)
+
+  const lastPaid = billable.filter(r => r.paid)
+    .sort((a, b) => b.dropoff_date.localeCompare(a.dropoff_date))[0] ?? null
+  const dueCash  = unpaid.filter(r => r.payment_method === 'cash')
+  const dueVenmo = unpaid.filter(r => r.payment_method === 'venmo')
+
+  if (!lastPaid && unpaid.length === 0) return null
+
+  const DueGroup = ({ label, list, venmo }: { label: string; list: Reservation[]; venmo?: boolean }) => {
+    if (list.length === 0) return null
+    return (
+      <div style={s.dueGroup}>
+        <div style={s.dueGroupHead}>
+          <span style={s.balanceSubLabel}>
+            {label}{venmo && <> · <span style={s.venmoHandle}>{VENMO_USERNAME}</span></>}
+          </span>
+          <span style={s.balanceDue}>${sum(list).toFixed(2)}</span>
+        </div>
+        {list.map(r => (
+          <div key={r.id} style={s.dueLine}>
+            <span style={s.dueLineLeft}>{svcLabel(r.service_type)} · {resDatesLabel(r)}</span>
+            <span style={s.dueLineAmt}>${Number(r.total_price).toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <section style={s.section}>
+      <h3 style={s.sectionTitle}>Balance</h3>
+      <div style={s.balanceCard}>
+        {lastPaid && (
+          <div style={s.lastPaidRow}>
+            <div>
+              <p style={s.balanceLabel}>Last Paid Service</p>
+              <p style={s.lastPaidDetail}>{svcLabel(lastPaid.service_type)} · {resDatesLabel(lastPaid)}</p>
+            </div>
+            <span style={s.balancePaid}>${Number(lastPaid.total_price).toFixed(2)}</span>
+          </div>
+        )}
+        {unpaid.length > 0 && (
+          <>
+            {lastPaid && <div style={s.balanceDivider} />}
+            <p style={{ ...s.balanceLabel, marginBottom: 8 }}>Balance Due</p>
+            <DueGroup label="💵 Cash" list={dueCash} />
+            <DueGroup label="💙 Venmo" list={dueVenmo} venmo />
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+// ── Notifications banner (Item 4 delivery surface) ──────────────
+// Surfaces unread client notifications (e.g. staff payment reminders, and
+// reservation-change messages that were previously written but never shown).
+function NotificationsBanner({ items, onDismiss }: {
+  items: ClientNotification[]
+  onDismiss: (id: string) => void
+}) {
+  if (items.length === 0) return null
+  return (
+    <section style={{ marginBottom: 28, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {items.map(n => (
+        <div key={n.id} style={s.noteCard}>
+          <span style={s.noteIcon}>🔔</span>
+          <p style={s.noteMsg}>{n.message}</p>
+          <button type="button" onClick={() => onDismiss(n.id)} style={s.noteDismiss} aria-label="Dismiss">Dismiss</button>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 // ── Page ───────────────────────────────────────────────────────
 export default function DashboardPage() {
   const router   = useRouter()
@@ -755,6 +863,7 @@ export default function DashboardPage() {
   const [mgStatus,     setMgStatus]     = useState<ClientProfile['meet_greet_status']>('needed')
   const [mgRecord,     setMgRecord]     = useState<MeetGreetRecord | null>(null)
   const [mgAddress,    setMgAddress]    = useState<string | null>(null)
+  const [notifications, setNotifications] = useState<ClientNotification[]>([])
 
   useEffect(() => {
     async function load() {
@@ -768,7 +877,7 @@ export default function DashboardPage() {
           .single(),
         supabase.from('dogs').select('id, name, birthdate, photo_url, gender').eq('active', true).order('name'),
         supabase.from('reservations')
-          .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, care_notes')
+          .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, paid, care_notes')
           .order('dropoff_date', { ascending: false }),
       ])
 
@@ -848,6 +957,15 @@ export default function DashboardPage() {
       }
 
       setReservations(rawRes.map(r => ({ ...r, dogs: dogMap[r.id] ?? [] })))
+
+      // Unread client notifications (payment reminders, reservation changes)
+      const { data: notes } = await supabase
+        .from('notifications')
+        .select('id, message, created_at')
+        .eq('read', false)
+        .order('created_at', { ascending: false })
+      setNotifications(notes ?? [])
+
       setLoading(false)
     }
     load()
@@ -911,6 +1029,11 @@ export default function DashboardPage() {
     setProfile(prev => prev ? { ...prev, meet_greet_status: 'requested' } : prev)
   }
 
+  async function dismissNotification(id: string) {
+    setNotifications(prev => prev.filter(n => n.id !== id))
+    await supabase.from('notifications').update({ read: true }).eq('id', id)
+  }
+
   const firstName = profile?.first_name || 'there'
   const { active, past } = sortReservations(reservations)
 
@@ -923,6 +1046,9 @@ export default function DashboardPage() {
 
       <main style={s.main}>
         <h2 style={s.greeting}>Welcome back, {firstName}! 👋</h2>
+
+        {/* ── Notifications (payment reminders, reservation changes) ── */}
+        <NotificationsBanner items={notifications} onDismiss={dismissNotification} />
 
         {/* ── Meet & Greet ── */}
         <MeetGreetSection
@@ -971,6 +1097,9 @@ export default function DashboardPage() {
         {cancelError && (
           <p style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>{cancelError}</p>
         )}
+
+        {/* ── Balance summary ── */}
+        <BalanceSummary reservations={reservations} />
 
         {/* ── Active reservations ── */}
         <section style={s.section}>
@@ -1075,11 +1204,37 @@ const s: Record<string, React.CSSProperties> = {
   resHeaderLeft:    { display: 'flex', alignItems: 'center', gap: 8 },
   serviceBadge:     { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1.5px solid', background: 'transparent' },
   resPrice:         { fontSize: 18, fontWeight: 800, color: '#111827' },
+  paidBadge:        { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: '#f0fdf4', color: '#15803d' },
+  unpaidBadge:      { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: '#fffbeb', color: '#b45309' },
+  venmoHandle:      { fontWeight: 700, color: '#374151' },
+  // Balance summary
+  balanceCard:      { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' },
+  balanceRow:       { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
+  balanceLabel:     { fontSize: 14, fontWeight: 700, color: '#374151' },
+  balancePaid:      { fontSize: 18, fontWeight: 800, color: '#15803d' },
+  balanceDue:       { fontSize: 18, fontWeight: 800, color: '#b45309' },
+  balanceDivider:   { height: 1, background: '#f3f4f6', margin: '12px 0' },
+  balanceSubRow:    { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 },
+  balanceSubLabel:  { fontSize: 13, color: '#6b7280', fontWeight: 600 },
+  balanceSubVal:    { fontSize: 14, fontWeight: 700, color: '#374151' },
+  lastPaidRow:      { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  lastPaidDetail:   { margin: '3px 0 0', fontSize: 13, color: '#6b7280' },
+  dueGroup:         { marginTop: 4 },
+  dueGroupHead:     { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8 },
+  dueLine:          { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4, paddingLeft: 4 },
+  dueLineLeft:      { fontSize: 13, color: '#374151' },
+  dueLineAmt:       { fontSize: 13, fontWeight: 600, color: '#374151' },
+  // Notifications
+  noteCard:         { display: 'flex', alignItems: 'flex-start', gap: 10, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '14px 16px' },
+  noteIcon:         { fontSize: 16, lineHeight: 1.4 },
+  noteMsg:          { margin: 0, flex: 1, fontSize: 14, color: '#1e3a5f', lineHeight: 1.5 },
+  noteDismiss:      { fontSize: 12, fontWeight: 600, color: '#1d4ed8', background: '#fff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 },
   resDogs:          { margin: '0 0 10px', fontSize: 15, fontWeight: 600, color: '#111827' },
   resDates:         { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 },
   dateLabel:        { fontSize: 11, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 8 },
   dateVal:          { fontSize: 13, color: '#374151', fontWeight: 500 },
   careNotes:        { margin: '8px 0', fontSize: 13, color: '#6b7280', fontStyle: 'italic', background: 'var(--surface-muted)', borderRadius: 6, padding: '6px 10px' },
+  longStayNote:     { margin: '8px 0', fontSize: 12.5, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 },
   resMeta:          { display: 'flex', gap: 12, marginTop: 8 },
   metaItem:         { fontSize: 11, color: '#9ca3af' },
   cancelRow:        { marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },

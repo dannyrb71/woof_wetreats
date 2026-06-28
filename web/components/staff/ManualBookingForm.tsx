@@ -90,9 +90,9 @@ export function ManualBookingForm({ onCreated, onClose }: { onCreated: () => voi
       </div>
 
       <div style={s.pickerRow}>
-        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={noBlocked} rangeEnd={service === 'boarding' ? pickDate : null} />
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={noBlocked} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
         {service === 'boarding' && (
-          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={noBlocked} rangeStart={dropDate} minDate={dropDate ?? undefined} />
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={noBlocked} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
         )}
       </div>
       <div style={s.fieldRow}>

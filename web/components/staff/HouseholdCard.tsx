@@ -39,6 +39,9 @@ export interface Household {
   pickup_date:       string | null
   total_price:       number | null
   payment_method:    string | null
+  paid:              boolean | null
+  has_unpaid_balance: boolean | null
+  unpaid_total:      number | null
   dogs:              DogRow[]
   staff_note:        string | null
 }
@@ -97,7 +100,13 @@ interface Props {
 
 export function HouseholdCard({ household, onClick }: Props) {
   const { service_type, res_status, blocked } = household
+  // EVERY client always shows a card with its most-relevant reservation
+  // (latest completed / in-progress / next upcoming). Nothing about completion
+  // hides the card or fades it — that treatment lives only on the Daily Schedule.
   const hasReservation = service_type !== null
+  // Financial info hides per-reservation once paid: the only dollar figure on the
+  // card is the client's outstanding balance, which drops to 0 when all is paid.
+  const unpaidTotal    = Number(household.unpaid_total ?? 0)
   const hasScheduledMG = household.mg_status === 'scheduled' && !!household.mg_date
   // Staff action needed: client requested a Meet & Greet that isn't scheduled yet
   const needsAction    = household.meet_greet_status === 'requested'
@@ -108,8 +117,6 @@ export function HouseholdCard({ household, onClick }: Props) {
   const svcColor       = service_type === 'boarding' ? COLORS.boarding
                        : service_type === 'daycare'  ? COLORS.daycare
                        : '#9ca3af'
-  const isCompleted    = res_status === 'completed'
-
   const nights = hasReservation && household.dropoff_date && household.pickup_date
     ? nightsBetween(household.dropoff_date, household.pickup_date)
     : null
@@ -124,7 +131,6 @@ export function HouseholdCard({ household, onClick }: Props) {
       style={{
         ...s.card,
         borderColor: border,
-        opacity: isCompleted && !hovered ? 0.5 : 1,
         boxShadow: hovered ? '0 8px 32px rgba(0,0,0,0.13)' : '0 2px 12px rgba(0,0,0,0.07)',
         transform: hovered ? 'translateY(-2px)' : 'none',
         background: blocked ? '#fff8f8' : '#fff',
@@ -153,6 +159,12 @@ export function HouseholdCard({ household, onClick }: Props) {
           {hasReservation && (
             <span style={{ ...s.badge, borderColor: svcColor, color: svcColor }}>
               {serviceLabel(service_type)}
+            </span>
+          )}
+          {nights !== null && nights > 14 && (
+            <span style={{ ...s.badge, background: '#7c3aed', color: '#fff', borderColor: '#7c3aed' }}
+              title="Stay over 14 nights — confirm custom flat rate">
+              🌙 Long stay
             </span>
           )}
           {needsAction && (
@@ -221,8 +233,10 @@ export function HouseholdCard({ household, onClick }: Props) {
               )}
             </span>
           </div>
-          {household.total_price !== null && (
-            <span style={s.price}>${household.total_price.toFixed(2)}</span>
+          {/* Financial: show the outstanding balance only. Once every booking is
+              paid this is 0 → no dollar amount appears. */}
+          {unpaidTotal > 0 && (
+            <span style={s.balanceDue}>Balance due ${unpaidTotal.toFixed(2)}</span>
           )}
         </div>
       ) : (
@@ -258,6 +272,7 @@ const s: Record<string, React.CSSProperties> = {
   statusPill:      { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' as const },
   dates:           { fontSize: 12, color: '#6b7280' },
   price:           { fontSize: 15, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap' as const },
+  balanceDue:      { fontSize: 13, fontWeight: 700, color: '#b45309', whiteSpace: 'nowrap' as const },
 
   notePreview:     { margin: '10px 0 0', fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' },
 

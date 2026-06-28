@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { calculatePrice, MaxStayExceededError } from '@/lib/pricing-engine'
 import type { RateTable, PaymentMethod, ServiceType } from '@/lib/pricing-engine'
+import { VENMO_USERNAME } from '@/lib/payment'
 import DatePicker from '@/components/booking/DatePicker'
 import TimePicker from '@/components/booking/TimePicker'
 
@@ -13,7 +14,7 @@ interface Dog { id: string; name: string; birthdate: string }
 interface Reservation {
   id: string; service_type: 'boarding' | 'daycare'; status: string
   dropoff_date: string; dropoff_time: string; pickup_date: string; pickup_time: string
-  payment_method: string; total_price: number; price_overridden: boolean
+  payment_method: string; total_price: number; price_overridden: boolean; paid: boolean
   care_notes: string | null; dogs: string[]; dog_ids: string[]
 }
 
@@ -40,6 +41,30 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [paid, setPaid] = useState(res.paid)
+  const [paidBusy, setPaidBusy] = useState(false)
+  const [pm, setPm] = useState<'cash' | 'venmo'>((res.payment_method as 'cash' | 'venmo') || 'cash')
+  const [pmBusy, setPmBusy] = useState(false)
+
+  async function togglePaid() {
+    const next = !paid
+    setPaidBusy(true); setPaid(next); setErr('')
+    const { error } = await supabase.from('reservations').update({ paid: next }).eq('id', res.id)
+    setPaidBusy(false)
+    if (error) { setPaid(!next); setErr('Could not update paid status — try again.'); return }
+    onChanged() // refresh so the section's unpaid total recomputes
+  }
+
+  // Correct the recorded payment METHOD after the fact (independent of paid).
+  // Does not reprice — staff can adjust the total via Edit/override if needed.
+  async function setMethod(next: 'cash' | 'venmo') {
+    if (next === pm) return
+    setPmBusy(true); setPm(next); setErr('')
+    const { error } = await supabase.from('reservations').update({ payment_method: next }).eq('id', res.id)
+    setPmBusy(false)
+    if (error) { setPm(pm); setErr('Could not update payment method — try again.'); return }
+    onChanged()
+  }
 
   if (editing) {
     return (
@@ -65,6 +90,9 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ ...s.svcBadge, color: SVC[res.service_type], borderColor: SVC[res.service_type] }}>{isBoarding ? '🏠 Boarding' : '🌞 Daycare'}</span>
           <span style={{ ...s.statusPill, background: st.bg, color: st.color }}>{st.label}</span>
+          {res.status !== 'cancelled' && (
+            <span style={paid ? s.paidPill : s.unpaidPill}>{paid ? '✅ Paid' : '● Unpaid'}</span>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
           <span style={s.price}>${Number(res.total_price).toFixed(2)}</span>
@@ -92,6 +120,20 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
             </>
           ) : (
             <>
+              <button type="button" onClick={togglePaid} disabled={paidBusy}
+                style={{ ...(paid ? s.markUnpaidBtn : s.markPaidBtn), opacity: paidBusy ? 0.6 : 1, cursor: paidBusy ? 'not-allowed' : 'pointer' }}>
+                {paid ? 'Mark Unpaid' : 'Mark Paid'}
+              </button>
+              {!paid && (
+                <span style={s.pmToggle} title="Correct the recorded payment method">
+                  {(['cash', 'venmo'] as const).map(m => (
+                    <button key={m} type="button" onClick={() => setMethod(m)} disabled={pmBusy}
+                      style={{ ...s.pmSeg, ...(pm === m ? s.pmSegOn : {}), cursor: pmBusy ? 'not-allowed' : 'pointer' }}>
+                      {m === 'cash' ? '💵 Cash' : '💙 Venmo'}
+                    </button>
+                  ))}
+                </span>
+              )}
               <button type="button" onClick={() => { setEditing(true); setErr('') }} style={s.editBtn}>Edit</button>
               <button type="button" onClick={() => { setConfirming(true); setErr('') }} style={s.cancelBtn}>Cancel Reservation</button>
             </>
@@ -200,9 +242,9 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
       </div>
 
       <div style={s.pickerRow}>
-        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} />
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
         {service === 'boarding' && (
-          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} />
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
         )}
       </div>
       {/* Both daycare AND boarding capture drop-off + pick-up time (matches client flow) */}
@@ -349,9 +391,9 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
       </div>
 
       <div style={s.pickerRow}>
-        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} />
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
         {service === 'boarding' && (
-          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} />
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
         )}
       </div>
       <div style={s.fieldRow}>
@@ -397,8 +439,8 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
 }
 
 // ── Section wrapper: loads everything, renders list + new form ──
-export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChanged }: {
-  clientId: string; dogs: Dog[]; meetGreetCompleted: boolean; onChanged?: () => void
+export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCompleted, onChanged }: {
+  clientId: string; clientFirstName?: string; dogs: Dog[]; meetGreetCompleted: boolean; onChanged?: () => void
 }) {
   const supabase = createClient()
   const [reservations, setReservations] = useState<Reservation[]>([])
@@ -406,11 +448,31 @@ export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChange
   const [rates, setRates] = useState<RateTable | null>(null)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [reminderState, setReminderState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+
+  // Outstanding balance = unpaid, non-cancelled reservations.
+  const unpaidTotal = reservations
+    .filter(r => !r.paid && r.status !== 'cancelled')
+    .reduce((t, r) => t + Number(r.total_price), 0)
+
+  // Item 4: staff-initiated, per-click. Inserts a warm, low-pressure in-app
+  // notification the client sees on their dashboard. Never automatic/scheduled.
+  async function sendReminder() {
+    setReminderState('sending')
+    const name = clientFirstName?.trim() || 'there'
+    const message =
+      `Hi ${name}! Just a friendly reminder that there's an outstanding balance of ` +
+      `$${unpaidTotal.toFixed(2)} on your account whenever you get a chance. ` +
+      `Venmo can go to ${VENMO_USERNAME}, or cash works too. ` +
+      `If anything looks off or you've already paid, just let us know and we'll happily sort it out. Thank you! 🐾`
+    const { error } = await supabase.from('notifications').insert({ client_id: clientId, message, read: false })
+    setReminderState(error ? 'error' : 'sent')
+  }
 
   const load = useCallback(async () => {
     const [resR, bdR, rtR] = await Promise.all([
       supabase.from('reservations')
-        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, price_overridden, care_notes')
+        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, price_overridden, paid, care_notes')
         .eq('client_id', clientId).order('dropoff_date', { ascending: false }),
       supabase.from('blocked_dates').select('date'),
       supabase.rpc('get_pricing_rates'),
@@ -445,6 +507,21 @@ export function StaffReservations({ clientId, dogs, meetGreetCompleted, onChange
         <h2 style={s.sectionTitle}>Reservations{!loading ? ` (${reservations.length})` : ''}</h2>
         {!showNew && <button type="button" onClick={() => setShowNew(true)} style={s.newBtn}>+ New Reservation</button>}
       </div>
+
+      {!loading && unpaidTotal > 0 && (
+        <div style={s.balanceBar}>
+          <span style={s.balanceText}>Outstanding balance: <b>${unpaidTotal.toFixed(2)}</b></span>
+          {reminderState === 'sent' ? (
+            <span style={s.reminderSent}>✓ Reminder sent</span>
+          ) : (
+            <button type="button" onClick={sendReminder} disabled={reminderState === 'sending'}
+              style={{ ...s.reminderBtn, opacity: reminderState === 'sending' ? 0.6 : 1, cursor: reminderState === 'sending' ? 'not-allowed' : 'pointer' }}>
+              {reminderState === 'sending' ? 'Sending…' : '🔔 Send payment reminder'}
+            </button>
+          )}
+          {reminderState === 'error' && <span style={{ fontSize: 12, color: '#dc2626' }}>Could not send — try again.</span>}
+        </div>
+      )}
 
       {showNew && (
         <NewReservationForm
@@ -481,6 +558,17 @@ const s: Record<string, React.CSSProperties> = {
   cancelBtn:    { fontSize: 12, fontWeight: 600, color: '#be123c', background: '#fff', border: '1px solid #fecdd3', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   overrideBadge:{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' },
   overrideTag:  { fontSize: 12, fontWeight: 600, color: '#92400e' },
+  paidPill:     { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#f0fdf4', color: '#15803d' },
+  unpaidPill:   { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#fffbeb', color: '#b45309' },
+  markPaidBtn:  { fontSize: 12, fontWeight: 600, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 6, padding: '5px 12px', fontFamily: 'inherit' },
+  markUnpaidBtn:{ fontSize: 12, fontWeight: 600, color: '#92400e', background: '#fff', border: '1px solid #fde68a', borderRadius: 6, padding: '5px 12px', fontFamily: 'inherit' },
+  pmToggle:     { display: 'inline-flex', border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden' },
+  pmSeg:        { fontSize: 12, fontWeight: 600, color: '#6b7280', background: '#fff', border: 'none', padding: '5px 10px', fontFamily: 'inherit' },
+  pmSegOn:      { background: '#eff6ff', color: '#1d4ed8' },
+  balanceBar:   { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 14px', marginBottom: 12 },
+  balanceText:  { fontSize: 13, color: '#92400e' },
+  reminderBtn:  { fontSize: 12, fontWeight: 700, color: '#fff', background: '#d97706', border: 'none', borderRadius: 999, padding: '6px 14px', fontFamily: 'inherit' },
+  reminderSent: { fontSize: 12, fontWeight: 700, color: '#15803d' },
   yes:          { fontSize: 12, fontWeight: 600, color: '#fff', background: '#be123c', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   no:           { fontSize: 12, fontWeight: 600, color: '#374151', background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   form:         { background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 12, padding: '18px 20px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 },

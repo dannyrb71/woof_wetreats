@@ -73,6 +73,7 @@ export function SiteNav() {
             <>
               <a href="/staff/schedule" style={s.link}>Daily Schedule</a>
               <a href="/staff"          style={s.link}>Staff Dashboard</a>
+              <a href="/staff/rover"    style={s.link}>Rover</a>
               <a href="/staff/settings" style={s.settingsLink}>
                 Settings
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"

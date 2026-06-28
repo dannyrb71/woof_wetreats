@@ -9,67 +9,14 @@ import { StaffManager } from '@/components/staff/StaffManager'
 import { PricingEditor } from '@/components/staff/PricingEditor'
 import { LandingCopyEditor } from '@/components/staff/LandingCopyEditor'
 
-type TabKey = 'landing' | 'availability' | 'pricing' | 'staff' | 'features'
+type TabKey = 'landing' | 'availability' | 'pricing' | 'staff'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'availability', label: 'Availability' },
   { key: 'pricing',      label: 'Pricing' },
   { key: 'staff',        label: 'Staff' },
-  { key: 'features',     label: 'Features' },
   { key: 'landing',      label: 'Landing Page' },
 ]
-
-// ── Manual-booking feature toggle (app_settings key) ───────────
-function ManualBookingSetting() {
-  const supabase = createClient()
-  const [enabled, setEnabled] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [saving,  setSaving]  = useState(false)
-  const [err,     setErr]     = useState('')
-
-  useEffect(() => {
-    supabase.from('app_settings').select('value').eq('key', 'manual_booking_enabled').maybeSingle()
-      .then(({ data }) => { setEnabled(data?.value === 'true'); setLoading(false) })
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function toggle() {
-    const next = !enabled
-    setSaving(true); setErr('')
-    const { error } = await supabase.from('app_settings')
-      .upsert({ key: 'manual_booking_enabled', value: next ? 'true' : 'false', updated_at: new Date().toISOString() }, { onConflict: 'key' })
-    setSaving(false)
-    if (error) { setErr('Could not save — try again.'); return }
-    setEnabled(next)
-  }
-
-  if (loading) return <p style={{ fontSize: 13, color: '#9ca3af' }}>Loading…</p>
-
-  return (
-    <div style={fs.row}>
-      <div>
-        <p style={fs.label}>Manual booking creation</p>
-        <p style={fs.hint}>
-          Lets staff add a booking for a client who has no account yet (so the schedule stays
-          accurate). When off, the option is hidden entirely. Any staff member can use it while
-          enabled — this should become manager/admin-only once staff roles exist.
-        </p>
-        {err && <p style={{ margin: '4px 0 0', fontSize: 12, color: '#dc2626' }}>{err}</p>}
-      </div>
-      <button type="button" role="switch" aria-checked={enabled} onClick={toggle} disabled={saving}
-        style={{ ...fs.toggle, background: enabled ? '#16a34a' : '#d1d5db', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1 }}>
-        <span style={{ ...fs.knob, transform: enabled ? 'translateX(20px)' : 'translateX(0)' }} />
-      </button>
-    </div>
-  )
-}
-
-const fs: Record<string, React.CSSProperties> = {
-  row:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
-  label:  { margin: 0, fontSize: 14, fontWeight: 700, color: '#111827' },
-  hint:   { margin: '4px 0 0', fontSize: 13, color: '#6b7280', lineHeight: 1.6, maxWidth: 560 },
-  toggle: { position: 'relative', width: 44, height: 24, borderRadius: 999, border: 'none', padding: 0, flexShrink: 0, transition: 'background 0.15s', fontFamily: 'inherit' },
-  knob:   { position: 'absolute', top: 2, left: 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'transform 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' },
-}
 
 export default function StaffSettingsPage() {
   const router   = useRouter()
@@ -152,13 +99,6 @@ export default function StaffSettingsPage() {
             </>
           )}
 
-          {tab === 'features' && (
-            <>
-              <h3 style={s.sectionTitle}>Features</h3>
-              <p style={s.sectionHint}>Turn optional staff features on or off.</p>
-              <ManualBookingSetting />
-            </>
-          )}
         </section>
       </main>
     </div>

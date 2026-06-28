@@ -55,14 +55,32 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
     onChanged() // refresh so the section's unpaid total recomputes
   }
 
-  // Correct the recorded payment METHOD after the fact (independent of paid).
-  // Does not reprice — staff can adjust the total via Edit/override if needed.
+  // Correct the recorded payment METHOD after the fact. Routes through the SAME
+  // update-reservation edge function the Edit flow uses, so the total reprices to
+  // the new method's rate — EXCEPT when the price was manually overridden, in
+  // which case we pass the override through so the edge function preserves it.
   async function setMethod(next: 'cash' | 'venmo') {
     if (next === pm) return
+    const prev = pm
     setPmBusy(true); setPm(next); setErr('')
-    const { error } = await supabase.from('reservations').update({ payment_method: next }).eq('id', res.id)
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { setPm(prev); setPmBusy(false); setErr('Session expired — refresh.'); return }
+
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/update-reservation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        reservation_id: res.id, service_type: res.service_type,
+        dropoff_date: res.dropoff_date, dropoff_time: res.dropoff_time,
+        pickup_date: res.pickup_date, pickup_time: res.pickup_time,
+        payment_method: next, dog_ids: res.dog_ids,
+        // Overridden price → pass it back so it's preserved; otherwise null → recalc.
+        price_override: res.price_overridden ? Number(res.total_price) : null,
+      }),
+    })
+    const json = await resp.json().catch(() => ({}))
     setPmBusy(false)
-    if (error) { setPm(pm); setErr('Could not update payment method — try again.'); return }
+    if (!resp.ok) { setPm(prev); setErr(json.error ?? 'Could not update payment method — try again.'); return }
     onChanged()
   }
 

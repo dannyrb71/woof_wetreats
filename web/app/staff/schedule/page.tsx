@@ -6,7 +6,6 @@ import { COLORS } from '@/components/staff/HouseholdCard'
 import type { Household, DogRow } from '@/components/staff/HouseholdCard'
 import { HouseholdDetail } from '@/components/staff/HouseholdDetail'
 import { DogAvatar } from '@/components/staff/DogAvatar'
-import { ManualBookingForm } from '@/components/staff/ManualBookingForm'
 import { SiteNav } from '@/components/SiteNav'
 
 // ── Types ──────────────────────────────────────────────────────
@@ -213,14 +212,6 @@ export default function SchedulePage() {
   const [error,   setError]   = useState('')
   const [selected,    setSelected]    = useState<Household | null>(null)
   const [openingId,   setOpeningId]   = useState<string | null>(null)
-  const [manualEnabled, setManualEnabled] = useState(false)
-  const [showManual,    setShowManual]    = useState(false)
-
-  // Whether the manual-booking feature is switched on in Settings.
-  useEffect(() => {
-    supabase.from('app_settings').select('value').eq('key', 'manual_booking_enabled').maybeSingle()
-      .then(({ data }) => setManualEnabled(data?.value === 'true'))
-  }, [supabase])
 
   const load = useCallback(async (d: string) => {
     setLoading(true)
@@ -342,12 +333,10 @@ export default function SchedulePage() {
 
       <main style={s.main}>
         <h2 style={s.pageHeading}>Daily Schedule</h2>
-        {/* ── Manual booking (only when enabled in Settings) ── */}
-        {manualEnabled && (
-          <div style={{ textAlign: 'center', marginBottom: 14 }}>
-            <button type="button" onClick={() => setShowManual(true)} style={s.manualBtn}>+ Manual Booking</button>
-          </div>
-        )}
+        {/* ── Rover booking — opens the Rover page with the booking form ready ── */}
+        <div style={{ textAlign: 'center', marginBottom: 14 }}>
+          <button type="button" onClick={() => router.push('/staff/rover?new=1')} style={s.roverBtn}>+ Add Rover Booking</button>
+        </div>
         {/* ── Date picker ── */}
         <div style={s.dateBar}>
           <button type="button" onClick={() => setDate(d => shiftDate(d, -1))} style={s.navBtn} aria-label="Previous day">‹</button>
@@ -406,16 +395,6 @@ export default function SchedulePage() {
         <HouseholdModal household={selected} onClose={closeModal} onUpdate={setSelected} />
       )}
 
-      {showManual && (
-        <div style={s.overlay} onClick={() => setShowManual(false)} role="dialog" aria-modal="true" aria-label="Manual booking">
-          <div style={{ maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
-            <ManualBookingForm
-              onClose={() => setShowManual(false)}
-              onCreated={() => { setShowManual(false); load(date) }}
-            />
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -432,7 +411,7 @@ const s: Record<string, React.CSSProperties> = {
   dateInput:   { fontSize: 14, padding: '7px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', cursor: 'pointer' },
   dateLong:    { margin: '6px 0 0', fontSize: 14, fontWeight: 700, color: '#111827' },
   todayBtn:    { fontSize: 12, fontWeight: 600, color: '#2563eb', background: '#fff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '5px 14px', cursor: 'pointer', fontFamily: 'inherit' },
-  manualBtn:   { fontSize: 13, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontFamily: 'inherit' },
+  roverBtn:    { fontSize: 13, fontWeight: 700, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontFamily: 'inherit' },
 
   section:     { display: 'flex', flexDirection: 'column', gap: 12 },
   groupTitle:  { margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' },

@@ -166,6 +166,6 @@ const s: Record<string, React.CSSProperties> = {
   sortWrap:    { display: 'flex', alignItems: 'center', gap: 8 },
   sortLabel:   { fontSize: 13, color: '#6b7280' },
   sortSelect:  { fontSize: 13, padding: '6px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', fontFamily: 'inherit' },
-  grid:        { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 },
+  grid:        { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20, alignItems: 'start' },
   empty:       { textAlign: 'center', padding: '80px 24px' },
 }

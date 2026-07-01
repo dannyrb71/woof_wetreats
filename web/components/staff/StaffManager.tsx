@@ -96,7 +96,7 @@ export function StaffManager() {
 
   return (
     <div>
-      <p style={s.hint}>Everyone listed here has full staff access — managing clients, reservations, availability, and other staff. There are no permission tiers.</p>
+      <p style={s.hint}>Everyone listed here has full staff access — managing clients, bookings, availability, and other staff. There are no permission tiers.</p>
 
       {/* Add */}
       <div style={s.addRow}>
@@ -105,7 +105,7 @@ export function StaffManager() {
         <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') addMember() }}
           placeholder="email@example.com" style={s.input} />
-        <button type="button" onClick={addMember} disabled={adding} style={{ ...s.addBtn, opacity: adding ? 0.6 : 1 }}>
+        <button type="button" onClick={addMember} disabled={adding} className="btn btn-primary btn-sm">
           {adding ? 'Adding…' : 'Add Staff Member'}
         </button>
       </div>
@@ -134,8 +134,8 @@ export function StaffManager() {
                 {confirmId === m.id ? (
                   <div style={s.confirmWrap}>
                     <span style={s.confirmText}>Remove?</span>
-                    <button type="button" onClick={() => removeMember(m.id)} style={s.confirmYes}>Yes</button>
-                    <button type="button" onClick={() => setConfirmId(null)} style={s.confirmNo}>No</button>
+                    <button type="button" onClick={() => removeMember(m.id)} className="btn btn-destructive btn-xs">Yes</button>
+                    <button type="button" onClick={() => setConfirmId(null)} className="btn btn-ghost btn-xs">No</button>
                   </div>
                 ) : (
                   <button
@@ -143,7 +143,8 @@ export function StaffManager() {
                     onClick={() => setConfirmId(m.id)}
                     disabled={isLast}
                     title={isLast ? 'At least one staff member must remain' : 'Remove'}
-                    style={{ ...s.removeBtn, opacity: isLast ? 0.4 : 1, cursor: isLast ? 'not-allowed' : 'pointer' }}
+                    className="btn btn-destructive-outlined btn-xs"
+                    style={{ opacity: isLast ? 0.4 : 1, cursor: isLast ? 'not-allowed' : 'pointer' }}
                   >
                     Remove
                   </button>
@@ -162,16 +163,12 @@ const s: Record<string, React.CSSProperties> = {
   addRow:      { display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' },
   inputSm:     { width: 130, fontSize: 14, padding: '9px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit' },
   input:       { flex: 1, minWidth: 200, fontSize: 14, padding: '9px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit' },
-  addBtn:      { fontSize: 13, fontWeight: 600, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', fontFamily: 'inherit' },
   muted:       { fontSize: 13, color: '#9ca3af', margin: 0 },
   row:         { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 14px' },
   name:        { margin: 0, fontSize: 14, fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: 8 },
   email:       { margin: '2px 0 0', fontSize: 13, color: '#374151' },
   youTag:      { fontSize: 11, fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', padding: '2px 8px', borderRadius: 20 },
   meta:        { margin: '3px 0 0', fontSize: 12, color: '#9ca3af' },
-  removeBtn:   { flexShrink: 0, fontSize: 12, fontWeight: 600, color: '#be123c', background: '#fff', border: '1px solid #fecdd3', borderRadius: 6, padding: '6px 12px', fontFamily: 'inherit' },
   confirmWrap: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
   confirmText: { fontSize: 12, color: '#374151', fontWeight: 600 },
-  confirmYes:  { fontSize: 12, fontWeight: 600, color: '#fff', background: '#be123c', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontFamily: 'inherit' },
-  confirmNo:   { fontSize: 12, fontWeight: 600, color: '#374151', background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontFamily: 'inherit' },
 }

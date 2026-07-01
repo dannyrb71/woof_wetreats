@@ -1,17 +1,58 @@
 :root {
-  /* Main page body background — the area below the header/nav bar.
-     Change this one value to re-theme the whole app's body background. */
-  --page-bg: #eaeae5;
+  /* ── Design tokens (Batch 11a — Figma palette) ──────────────────
+     Single source of truth for the whole app's colors. Reference these by
+     name (var(--token)) in components — do not hardcode these hex values. */
 
-  /* Subtle inner fills (note boxes, price box, detail panels) that sit on
-     top of white cards. Distinct from the page background on purpose. */
-  --surface-muted: #f9fafb;
+  /* Neutrals */
+  --background:      #eaeae5;
+  --surface:         #FFFFFF;
+  --border:          #E6DFD8;
+  --text-primary:    #2E2A26;
+  --text-secondary:  #7A7068;
+  --text-muted:      #B5ADA6;
 
-  /* The ONE interactive-hover shadow used across the whole site — reused
-     directly from the existing card-hover treatment (staff HouseholdCard)
-     so buttons, links, and cards all share the same "this is interactive"
-     feel. Change here to change it everywhere. */
-  --hover-shadow: 0 8px 32px rgba(0, 0, 0, 0.13);
+  /* Brand / primary */
+  --primary:         #C08B6E;
+  --primary-light:   #E8CABB;
+  --primary-dark:    #8A5E48;
+
+  /* Status */
+  --status-boarding:     #5F87A8;
+  --status-arrival:      #4F9E87;
+  --status-departure:    #A65E3E;
+  --status-daycare:      #B8924A;
+  --status-in-progress:  #4F7A52;
+  --status-long-stay:    #7B6EA8;
+  --status-meet-greet:   #B8924A;
+  --status-no-activity:  #B0A9A4;
+
+  /* Semantic */
+  --success:  #6B8F6E;
+  --warning:  #C49A6A;
+  --error:    #B86B6B;
+
+  /* Charts */
+  --chart-1: #9E8FBE;
+  --chart-2: #7B9BB5;
+  --chart-3: #C4A56A;
+  --chart-4: #C08B6E;
+  --chart-5: #C49A9A;
+
+  /* Dog name colors by gender (Batch 11a values) */
+  --dog-male:    #4882AF;
+  --dog-female:  #AB5FB9;
+
+  /* Radius — cards 24px; pills/buttons fully rounded (rule below) */
+  --radius-card: 24px;
+
+  /* ── Backward-compatible aliases ──
+     Existing components reference these names; point them at the new palette so
+     the whole app re-themes from the tokens above. */
+  --page-bg:       var(--background);
+  --surface-muted: #F1ECE6;   /* subtle fill on top of white surfaces */
+
+  /* The ONE interactive-hover shadow used across the whole site. */
+  --hover-shadow: 0 8px 32px rgba(46, 42, 38, 0.13);
 }
 
 *,
@@ -41,9 +82,192 @@ a {
 }
 
 body {
-  background: var(--page-bg);
-  color: #111827;
+  background: var(--background);
+  color: var(--text-primary);
+  /* Keep the app's CURRENT font family — do not introduce a new font. */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* ── Active nav link ────────────────────────────────────────────
+   Active link is shown with --dog-male bold text (no underline — the header's
+   inner padding + variable row height meant a bar couldn't sit reliably flush
+   to the bottom edge across viewer types). Desktop and mobile share this. */
+.nav-link { position: relative; display: inline-flex; align-items: center; }
+.nav-link-active { color: var(--dog-male) !important; font-weight: 700; }
+
+/* ── Responsive navigation (Batch 11a) ──────────────────────────
+   Inline styles can't express media queries, so the desktop/mobile switch
+   lives here. Desktop links + avatar show ≥860px; hamburger shows below. */
+.nav-desktop { display: flex; align-items: center; gap: 22px; }
+.nav-hamburger { display: none; }
+
+@media (max-width: 860px) {
+  .nav-desktop { display: none; }
+  .nav-hamburger { display: inline-flex; }
+}
+
+/* Dashboard 3-column body → single column on tablet/mobile */
+.dash-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr) minmax(220px, 1fr);
+  gap: 16px;
+}
+@media (max-width: 980px) {
+  .dash-body { grid-template-columns: 1fr; align-items: start; }
+}
+
+/* ── Staff page headers ─────────────────────────────────────────
+   Two layouts:
+   • staff-header-3col  — pages with a date navigator
+       col 1 (1fr): title + subtitle, left-aligned
+       col 2 (auto): DateNavigator, truly centered on the page
+       col 3 (1fr): CTA button, right-aligned
+   • staff-header-2col  — pages without a date navigator (Rover, Clients)
+       flexbox space-between: text left, action right
+   DateNavigator always stacks vertically, content centered.            */
+
+.staff-header-3col {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 12px 24px;
+  margin-bottom: 20px;
+}
+.staff-header-3col .page-header-cta {
+  justify-self: end;
+  align-self: center;
+}
+
+.staff-header-2col {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.staff-header-2col .page-header-cta {
+  align-self: center;
+}
+
+.date-navigator { display: flex; flex-direction: column; align-items: center; }
+.date-nav-row   { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 860px) {
+  /* 3-col header → single centered column */
+  .staff-header-3col {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+  .staff-header-3col .page-header-cta {
+    justify-self: stretch;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* 2-col header → stack and center */
+  .staff-header-2col {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .staff-header-2col .page-header-cta {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* Title/subtitle text always centers on mobile */
+  .page-header-text { text-align: center; }
+}
+
+/* ── Daily Schedule two-column layout ──────────────────────────── */
+.sched-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 35%) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .sched-body { grid-template-columns: 1fr; }
+}
+
+/* ── Profile / Dashboard 2-column layout ──────────────────────
+   Staff profile:  left (1/3) = Current Stay + Client Info + M&G + Access
+                   right (2/3) = Dogs + Care Notes + Staff Notes + Reservations
+   Client profile: left (1/3) = dogs + balance; right (2/3) = reservations.
+
+   Staff mobile order (top → bottom):
+     Current Stay → Dogs → Care Notes → Staff Notes → Reservations
+     → Client Info → Meet & Greet → Client Access
+
+   Achieved via display:contents on the column wrappers so individual
+   sections become direct grid children and can use the `order` property.  */
+.profile-layout-staff,
+.profile-layout-client {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  grid-template-areas: "col-left col-right";
+  gap: 24px;
+  align-items: start;
+}
+.profile-col-left  { grid-area: col-left;  display: flex; flex-direction: column; gap: 20px; }
+.profile-col-right { grid-area: col-right; display: flex; flex-direction: column; gap: 20px; }
+
+@media (max-width: 860px) {
+  .profile-layout-staff {
+    grid-template-columns: 1fr;
+    grid-template-areas: none;
+  }
+  /* Flatten column wrappers; their children become direct grid children */
+  .profile-layout-staff .profile-col-left,
+  .profile-layout-staff .profile-col-right {
+    display: contents;
+  }
+  .sp-current-stay  { order: 1; }
+  .sp-dogs          { order: 2; }
+  .sp-care-notes    { order: 3; }
+  .sp-staff-notes   { order: 4; }
+  .sp-reservations  { order: 5; }
+  .sp-client-info   { order: 6; }
+  .sp-meet-greet    { order: 7; }
+  .sp-client-access { order: 8; }
+
+  .profile-layout-client {
+    grid-template-columns: 1fr;
+    grid-template-areas: "col-right" "col-left";
+  }
+}
+
+/* ── Section label — ALL CAPS, ADA-compliant (sitewide) ────────────────────
+   Use className="section-label" on every card / section title.
+   --text-primary at 12px bold uppercase passes AA on white at any size.   */
+.section-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+/* ── Clients page search input ─────────────────────────────────────────────
+   Prevents flex-basis 320px being treated as HEIGHT on the column-flex
+   axis when the 2-col header stacks on mobile.                            */
+.clients-search-input {
+  display: block;
+  box-sizing: border-box;
+  font-size: 14px;
+  padding: 10px 16px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  width: 320px;
+  max-width: 100%;
 }
 
 /* ── Site-wide interactive states ──────────────────────────────
@@ -74,4 +298,116 @@ button:active:not(:disabled) {
 button:disabled {
   filter: none;
   box-shadow: none;
+  opacity: 0.5;
+  cursor: not-allowed !important;
+  pointer-events: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   BUTTON DESIGN SYSTEM
+   Usage: className="btn btn-primary"  (size modifier optional)
+   Sizes: .btn (full, 44px), .btn-sm (36px), .btn-xs (28px), .btn-icon (40×40)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Base ─────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 10px 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 9999px !important;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: background 0.15s ease, opacity 0.15s ease, filter 0.15s ease,
+              box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+/* ── Variants ─────────────────────────────────────────────────── */
+.btn-primary {
+  background: var(--primary);
+  color: #ffffff;
+  border: none;
+}
+.btn-outlined {
+  background: transparent;
+  color: var(--primary);
+  border: 1.5px solid var(--primary) !important;
+}
+.btn-ghost {
+  background: var(--background);
+  color: var(--text-secondary);
+  border: none;
+}
+.btn-destructive {
+  background: var(--error);
+  color: #ffffff;
+  border: none;
+}
+.btn-destructive-outlined {
+  background: transparent;
+  color: var(--error);
+  border: 1.5px solid var(--error) !important;
+}
+.btn-success {
+  background: var(--success);
+  color: #ffffff;
+  border: none;
+}
+.btn-rover {
+  background: var(--status-in-progress);
+  color: #ffffff;
+  border: none;
+}
+/* Booking-CREATION actions (New Booking, Create Booking, Add Rover Booking,
+   Request Booking) are always GREEN per the locked-in button system. */
+.btn-booking {
+  background: var(--status-in-progress);
+  color: #ffffff;
+  border: none;
+}
+
+/* ── Size modifiers ───────────────────────────────────────────── */
+.btn-sm {
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.btn-xs {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+/* Square icon button: same height/width, no text padding */
+.btn-icon {
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  font-size: 18px;
+}
+
+/* ── Focus ring (keyboard accessibility) ─────────────────────── */
+.btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.btn-destructive:focus-visible,
+.btn-destructive-outlined:focus-visible {
+  outline-color: var(--error);
+}
+
+/* ── Interaction states ───────────────────────────────────────── */
+.btn:hover:not(:disabled) { filter: brightness(0.92); }
+.btn:active:not(:disabled) { transform: scale(0.98); filter: brightness(0.88); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed !important; pointer-events: none; }

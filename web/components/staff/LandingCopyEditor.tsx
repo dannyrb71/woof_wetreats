@@ -102,11 +102,11 @@ export function LandingCopyEditor() {
                 {confirmIdx === i ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={s.confirmText}>Delete?</span>
-                    <button type="button" onClick={() => deleteParagraph(i)} style={s.confirmYes}>Yes</button>
-                    <button type="button" onClick={() => setConfirmIdx(null)} style={s.confirmNo}>No</button>
+                    <button type="button" onClick={() => deleteParagraph(i)} className="btn btn-destructive btn-xs">Yes</button>
+                    <button type="button" onClick={() => setConfirmIdx(null)} className="btn btn-ghost btn-xs">No</button>
                   </span>
                 ) : (
-                  <button type="button" onClick={() => setConfirmIdx(i)} style={s.deleteBtn}>Delete</button>
+                  <button type="button" onClick={() => setConfirmIdx(i)} className="btn btn-destructive-outlined btn-xs">Delete</button>
                 )}
               </div>
             </div>
@@ -134,7 +134,7 @@ export function LandingCopyEditor() {
       {notice && <p style={{ margin: '14px 0 0', fontSize: 13, color: '#15803d' }}>{notice}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
         <button type="button" onClick={save} disabled={!dirty || saving}
-          style={{ ...s.saveBtn, opacity: (!dirty || saving) ? 0.5 : 1, cursor: (!dirty || saving) ? 'not-allowed' : 'pointer' }}>
+          className="btn btn-primary btn-sm">
           {saving ? 'Saving…' : 'Save changes'}
         </button>
         {dirty && !saving && <span style={{ fontSize: 13, color: '#b45309' }}>Unsaved changes</span>}
@@ -152,13 +152,9 @@ const s: Record<string, React.CSSProperties> = {
   blockHeader:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' },
   boldBtn:      { fontSize: 13, width: 30, height: 28, borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', color: '#111827' },
-  deleteBtn:    { fontSize: 12, fontWeight: 600, color: '#be123c', background: '#fff', border: '1px solid #fecdd3', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit' },
   confirmText:  { fontSize: 12, color: '#374151', fontWeight: 600 },
-  confirmYes:   { fontSize: 12, fontWeight: 600, color: '#fff', background: '#be123c', border: 'none', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit' },
-  confirmNo:    { fontSize: 12, fontWeight: 600, color: '#374151', background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit' },
   textarea:     { width: '100%', fontSize: 14, lineHeight: 1.6, padding: '10px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' },
   preview:      { marginTop: 8, fontSize: 13, color: '#374151', lineHeight: 1.6 },
   previewLabel: { fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 8 },
   addBtn:       { marginTop: 14, fontSize: 13, fontWeight: 600, color: '#2563eb', background: '#fff', border: '1.5px dashed #bfdbfe', borderRadius: 10, padding: '9px 18px', cursor: 'pointer', fontFamily: 'inherit' },
-  saveBtn:      { fontSize: 14, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 8, padding: '10px 22px', fontFamily: 'inherit' },
 }

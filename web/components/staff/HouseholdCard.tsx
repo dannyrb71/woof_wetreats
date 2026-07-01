@@ -1,12 +1,15 @@
 'use client'
 import React from 'react'
+import { dogNameColor } from '@/lib/dog-colors'
+import { formatPhone } from '@/lib/format'
 
-// ── Theme tokens ───────────────────────────────────────────────
+// ── Status colors — token-backed (Batch 11a palette). These reference the CSS
+//    variables in globals.css so the whole app re-themes from one place. ──
 export const COLORS = {
-  boarding:  '#0058A0',
-  daycare:   '#C5A92B',
-  blocked:   '#C52B2D',
-  meetGreet: '#EA580C', // orange
+  boarding:  'var(--status-boarding)',
+  daycare:   'var(--status-daycare)',
+  blocked:   'var(--error)',
+  meetGreet: 'var(--status-meet-greet)',
 } as const
 
 // ── Types ──────────────────────────────────────────────────────
@@ -62,11 +65,11 @@ export function fmtDate(ymd: string): string {
 
 // Status takes priority; service-type only applies for upcoming
 export function strokeColor(status: string | null, serviceType: string | null): string {
-  if (status === 'cancelled' || status === 'completed') return '#9ca3af'
-  if (status === 'in_progress') return '#16a34a'
+  if (status === 'cancelled' || status === 'completed') return 'var(--status-no-activity)'
+  if (status === 'in_progress') return 'var(--status-in-progress)'
   if (serviceType === 'boarding') return COLORS.boarding
   if (serviceType === 'daycare')  return COLORS.daycare
-  return '#9ca3af'
+  return 'var(--status-no-activity)'
 }
 
 function serviceLabel(serviceType: string | null): string {
@@ -93,23 +96,8 @@ export function fmtTime(t: string): string {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
 }
 
-// Format a raw phone string as (XXX) XXX-XXXX when it's a 10-digit US number
-// (or 11 with a leading 1); otherwise return it unchanged.
-function fmtPhone(raw: string | null): string {
-  if (!raw) return ''
-  let d = raw.replace(/\D/g, '')
-  if (d.length === 11 && d.startsWith('1')) d = d.slice(1)
-  if (d.length !== 10) return raw
-  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`
-}
 
-// Dog name color by gender (icons removed). Boys blue, girls magenta,
-// unknown a neutral dark so it never miscolors.
-function dogNameColor(gender: string | null): string {
-  if (gender === 'male')   return '#2140AF'
-  if (gender === 'female') return '#AE08A1'
-  return '#111827'
-}
+
 
 // Compact-card name truncation (>8 chars → ellipsis). Full name still shows in
 // the detail view / modal — this is for the card only.
@@ -121,6 +109,18 @@ function cardName(name: string): string {
 const ARROW_DROPOFF = '⬇'
 const ARROW_PICKUP  = '⬆'
 
+// Daycare duration in hours from drop-off → pick-up time (e.g. "8.5"). Null when
+// times are missing or non-positive.
+function durationHours(a: string | null, b: string | null): string | null {
+  if (!a || !b) return null
+  const [h1, m1] = a.split(':').map(Number)
+  const [h2, m2] = b.split(':').map(Number)
+  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
+  if (mins <= 0) return null
+  const hrs = mins / 60
+  return Number.isInteger(hrs) ? String(hrs) : hrs.toFixed(1)
+}
+
 // ── Component ──────────────────────────────────────────────────
 interface Props {
   household: Household
@@ -129,26 +129,18 @@ interface Props {
 
 export function HouseholdCard({ household, onClick }: Props) {
   const { service_type, res_status, blocked } = household
-  // EVERY client always shows a card with its most-relevant reservation
-  // (latest completed / in-progress / next upcoming). Nothing about completion
-  // hides the card or fades it — that treatment lives only on the Daily Schedule.
+  // Every client always shows a card. "Active" = current/upcoming; a client whose
+  // only booking is in the past is INACTIVE ("Last booking was…"); a client with
+  // no non-cancelled booking shows "No Active Reservations" (Figma spec).
   const hasReservation = service_type !== null
-  // "Active" = something current or ahead. A client whose only booking is in the
-  // past (completed) is INACTIVE: no service tag, muted card, "Last booking was…".
   const isActive       = res_status === 'in_progress' || res_status === 'upcoming'
-  // Financial info hides per-reservation once paid: the only dollar figure on the
-  // card is the client's outstanding balance, which drops to 0 when all is paid.
+  // Only dollar figure on the card is the outstanding balance (drops to 0 when paid).
   const unpaidTotal    = Number(household.unpaid_total ?? 0)
   const hasScheduledMG = household.mg_status === 'scheduled' && !!household.mg_date
-  // Staff action needed: client requested a Meet & Greet that isn't scheduled yet
   const needsAction    = household.meet_greet_status === 'requested'
-  // M&G border only when there's no active reservation to color the card
-  const border         = !hasReservation && hasScheduledMG
-    ? COLORS.meetGreet
-    : strokeColor(res_status, service_type)
   const svcColor       = service_type === 'boarding' ? COLORS.boarding
                        : service_type === 'daycare'  ? COLORS.daycare
-                       : '#9ca3af'
+                       : 'var(--status-no-activity)'
   const nights = hasReservation && household.dropoff_date && household.pickup_date
     ? nightsBetween(household.dropoff_date, household.pickup_date)
     : null
@@ -162,111 +154,103 @@ export function HouseholdCard({ household, onClick }: Props) {
       onMouseLeave={() => setHovered(false)}
       style={{
         ...s.card,
-        borderColor: border,
-        boxShadow: hovered ? '0 8px 32px rgba(0,0,0,0.13)' : '0 2px 12px rgba(0,0,0,0.07)',
+        boxShadow: hovered ? '0 6px 22px rgba(0,0,0,0.14)' : '0 0 3.5px rgba(0,0,0,0.10)',
         transform: hovered ? 'translateY(-2px)' : 'none',
-        background: blocked ? '#fff8f8' : (isActive ? '#fff' : 'var(--surface-muted)'),
       }}
     >
-      {/* ── Top: dogs stacked (prominent) on the left, owner info upper-right ── */}
-      <div style={s.topRow}>
-        <div style={s.dogsCol}>
-          {household.dogs.length > 0
-            ? household.dogs.map(dog => (
-                <div key={dog.id} style={s.dogItem}>
-                  {dog.photoSigned
-                    ? <img src={dog.photoSigned} alt={dog.name} style={s.dogPhoto} />
-                    : <div style={s.dogFallback}>🐕</div>}
-                  <span style={{ ...s.dogName, color: dogNameColor(dog.gender) }} title={dog.name}>
-                    {cardName(dog.name)}
-                  </span>
-                </div>
-              ))
-            : <span style={s.noDogs}>No dogs on file</span>}
-        </div>
+      {/* ── Top section: fixed height, dogs left + owner upper-right, divider below ── */}
+      <div style={s.topSection}>
+        <div style={s.topRow}>
+          <div style={s.dogsCol}>
+            {household.dogs.length > 0
+              ? household.dogs.map(dog => (
+                  <div key={dog.id} style={s.dogItem}>
+                    {dog.photoSigned
+                      ? <img src={dog.photoSigned} alt={dog.name} style={s.dogPhoto} />
+                      : <div style={s.dogFallback}>🐕</div>}
+                    <span style={{ ...s.dogName, color: dogNameColor(dog.gender) }} title={dog.name}>
+                      {cardName(dog.name)}
+                    </span>
+                  </div>
+                ))
+              : <span style={s.noDogs}>No dogs on file</span>}
+          </div>
 
-        <div style={s.ownerCol}>
-          <span style={s.ownerName}>{household.first_name} {household.last_name}</span>
-          {household.phone && (
-            <a href={`tel:${household.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>
-              {fmtPhone(household.phone)}
-            </a>
-          )}
-          {(needsAction || hasScheduledMG || blocked) && (
-            <div style={s.ownerBadges}>
-              {needsAction && (
-                <span style={{ ...s.badge, background: COLORS.meetGreet, color: '#fff', borderColor: COLORS.meetGreet }}>🔔 M&amp;G requested</span>
-              )}
-              {hasScheduledMG && (
-                <span style={{ ...s.badge, borderColor: COLORS.meetGreet, color: COLORS.meetGreet }}>🤝 Meet &amp; Greet</span>
-              )}
-              {blocked && (
-                <span style={{ ...s.badge, background: COLORS.blocked, color: '#fff', borderColor: COLORS.blocked }}>Blocked</span>
-              )}
-            </div>
-          )}
+          <div style={s.ownerCol}>
+            <span style={s.ownerName}>{household.first_name} {household.last_name}</span>
+            {household.phone && (
+              <a href={`tel:${household.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>
+                {formatPhone(household.phone)}
+              </a>
+            )}
+            {(needsAction || hasScheduledMG || blocked) && (
+              <div style={s.ownerBadges}>
+                {needsAction && <span style={{ ...s.pill, background: COLORS.meetGreet, color: '#fff' }}>🔔 M&amp;G requested</span>}
+                {hasScheduledMG && <span style={{ ...s.pillOutline, color: COLORS.meetGreet, borderColor: COLORS.meetGreet }}>🤝 Meet &amp; Greet</span>}
+                {blocked && <span style={{ ...s.pill, background: COLORS.blocked, color: '#fff' }}>Blocked</span>}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Staff note preview (sits above the bottom-anchored footer) ── */}
-      {household.staff_note && (
-        <p style={s.notePreview}>📝 {household.staff_note}</p>
-      )}
+      <div style={s.divider} />
 
-      {/* ── Footer: status + service badge + date/time (left), money (right) ── */}
-      <div style={s.footer}>
-        <div style={s.footerLeft}>
-          {isActive ? (
-            <>
-              <div style={s.footerBadges}>
-                <span style={{
-                  ...s.statusPill,
-                  background: res_status === 'in_progress' ? '#dcfce7' : '#eff6ff',
-                  color:      res_status === 'in_progress' ? '#15803d' : '#1d4ed8',
-                }}>
-                  {statusLabel(res_status)}
-                </span>
-                <span style={{ ...s.badge, borderColor: svcColor, color: svcColor }}>{serviceLabel(service_type)}</span>
+      {/* ── Bottom section: flex-grow, content vertically centered ── */}
+      <div style={s.bottomSection}>
+        {isActive ? (
+          <div style={s.bottomActive}>
+            <div style={s.bottomLeft}>
+              <span style={s.statusText}>{statusLabel(res_status)}</span>
+              <div style={s.badgeRow}>
+                <span style={{ ...s.svcBadge, background: svcColor }}>{serviceLabel(service_type)}</span>
                 {nights !== null && nights > 14 && (
-                  <span style={{ ...s.badge, background: '#7c3aed', color: '#fff', borderColor: '#7c3aed' }}
-                    title="Stay over 14 nights — confirm custom flat rate">🌙 Long stay</span>
+                  <span style={s.longStay} title="Stay over 14 nights — confirm custom flat rate">🌙 Long stay</span>
                 )}
               </div>
+
               {service_type === 'daycare' ? (
-                // Daycare: single date + drop-off/pick-up times with ⬇/⬆ arrows.
-                <div style={s.dateTime}>
-                  <span style={s.dateText}>{fmtDate(household.dropoff_date!)}</span>
-                  <span style={s.timeRow}>
-                    {household.dropoff_time && <span>{ARROW_DROPOFF} {fmtTime(household.dropoff_time)}</span>}
-                    {household.pickup_time  && <span>{ARROW_PICKUP} {fmtTime(household.pickup_time)}</span>}
-                  </span>
+                <div style={s.dateBlock}>
+                  <span style={s.dateLine}>{fmtDate(household.dropoff_date!)}</span>
+                  {(household.dropoff_time || household.pickup_time) && (
+                    <span style={s.timeLine}>
+                      {household.dropoff_time && <>{ARROW_DROPOFF} {fmtTime(household.dropoff_time)}</>}
+                      {household.dropoff_time && household.pickup_time && ' – '}
+                      {household.pickup_time && <>{ARROW_PICKUP} {fmtTime(household.pickup_time)}</>}
+                    </span>
+                  )}
+                  {durationHours(household.dropoff_time, household.pickup_time) && (
+                    <span style={s.subLine}>{durationHours(household.dropoff_time, household.pickup_time)} hours</span>
+                  )}
                 </div>
               ) : (
-                <div style={s.dateTime}>
-                  <span style={s.dateText}>
-                    {fmtDate(household.dropoff_date!)}
-                    {nights !== null && nights > 0 && <> · {nights} night{nights !== 1 ? 's' : ''}</>}
+                <div style={s.dateBlock}>
+                  <span style={s.dateLine}>
+                    {fmtDate(household.dropoff_date!)}{household.dropoff_time && <> · {ARROW_DROPOFF} {fmtTime(household.dropoff_time)}</>}
                   </span>
+                  {household.pickup_date && (
+                    <span style={s.dateLine}>
+                      {fmtDate(household.pickup_date)}{household.pickup_time && <> · {ARROW_PICKUP} {fmtTime(household.pickup_time)}</>}
+                    </span>
+                  )}
+                  {nights !== null && nights > 0 && <span style={s.subLine}>{nights} night{nights !== 1 ? 's' : ''}</span>}
                 </div>
               )}
-            </>
-          ) : (
-            // Inactive (Batch 5 logic preserved): last booking date / no bookings.
-            <span style={s.inactiveText}>
-              {hasReservation
-                ? `Last booking was ${fmtDate(household.dropoff_date!)}`
-                : 'No bookings yet'}
-            </span>
-          )}
-        </div>
+            </div>
 
-        {/* Financial (Batch 5 logic): outstanding balance only — hidden when paid. */}
-        {unpaidTotal > 0 && (
-          <div style={s.footerRight}>
-            <span style={s.amount}>${unpaidTotal.toFixed(2)}</span>
-            {isActive && household.payment_method
-              ? <span style={s.amountSub}>{household.payment_method === 'cash' ? 'Cash' : 'Venmo'}</span>
-              : <span style={s.amountSub}>Balance due</span>}
+            {unpaidTotal > 0 && (
+              <div style={s.bottomRight}>
+                <span style={s.amount}>${unpaidTotal.toFixed(2)}</span>
+                <span style={s.amountSub}>{household.payment_method === 'venmo' ? 'Venmo' : 'Cash'}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={s.bottomInactive}>
+            <span style={s.inactiveText}>
+              {hasReservation ? `Last booking was ${fmtDate(household.dropoff_date!)}` : 'No Active Bookings'}
+            </span>
+            {unpaidTotal > 0 && <span style={s.inactiveBalance}>Balance due ${unpaidTotal.toFixed(2)}</span>}
           </div>
         )}
       </div>
@@ -276,48 +260,52 @@ export function HouseholdCard({ household, onClick }: Props) {
 
 // ── Styles ─────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  // Fixed height sized to comfortably fit 3 dog rows (our max per household) +
-  // the bottom block, so every card is the same height regardless of dog count.
-  card:            { borderRadius: 14, border: '2px solid', padding: '18px 20px', cursor: 'pointer', transition: 'all 0.18s ease', display: 'flex', flexDirection: 'column', gap: 0, height: 300, boxSizing: 'border-box' as const, overflow: 'hidden' },
+  // White card, 24px radius, soft shadow, NO border. Fixed total height so every
+  // card matches regardless of dog count / content (top fixed + bottom flex).
+  card:            { background: 'var(--surface)', borderRadius: 'var(--radius-card)', padding: 0, cursor: 'pointer', transition: 'all 0.18s ease', display: 'flex', flexDirection: 'column', height: 300, boxSizing: 'border-box' as const, overflow: 'hidden' },
 
-  // Top: dogs (left, prominent) + owner (upper-right, secondary)
-  topRow:          { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
-  dogsCol:         { display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, flex: 1 },
+  // Top section — fixed height; divider sits beneath it.
+  topSection:      { height: 163, padding: '18px 20px 0', boxSizing: 'border-box' as const, overflow: 'hidden', flexShrink: 0 },
+  divider:         { height: 1, background: '#dfdfdf', margin: '0 20px', flexShrink: 0 },
+
+  topRow:          { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  dogsCol:         { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, flex: 1 },
   dogItem:         { display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 },
-  dogPhoto:        { width: 44, height: 44, borderRadius: '50%', objectFit: 'cover' as const, border: '2px solid #e5e7eb', flexShrink: 0 },
-  dogFallback:     { width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 },
-  // Pets stay the most prominent text (gender-colored), but balanced — not oversized.
+  dogPhoto:        { width: 42, height: 42, borderRadius: '50%', objectFit: 'cover' as const, border: '2px solid var(--border)', flexShrink: 0 },
+  dogFallback:     { width: 42, height: 42, borderRadius: '50%', background: 'var(--surface-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 21, flexShrink: 0 },
   dogName:         { fontSize: 17, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, lineHeight: 1.15 },
-  noDogs:          { fontSize: 13, color: '#9ca3af' },
+  noDogs:          { fontSize: 13, color: 'var(--text-secondary)' },
 
   // Owner info — secondary, upper-right
-  ownerCol:        { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0, maxWidth: '46%', textAlign: 'right' as const },
-  ownerName:       { fontSize: 15, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
-  phone:           { fontSize: 14, color: '#2563eb', textDecoration: 'none', fontWeight: 600, whiteSpace: 'nowrap' },
+  ownerCol:        { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0, maxWidth: '48%', textAlign: 'right' as const },
+  ownerName:       { fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
+  phone:           { fontSize: 15, color: 'var(--status-boarding)', textDecoration: 'none', fontWeight: 600, whiteSpace: 'nowrap' },
   ownerBadges:     { display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end', marginTop: 6 },
-  badge:           { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, border: '1.5px solid', letterSpacing: '0.02em', background: 'transparent', whiteSpace: 'nowrap' },
+  pill:            { display: 'inline-flex', alignItems: 'center', height: 22, fontSize: 11, fontWeight: 700, padding: '0 10px', borderRadius: 999, whiteSpace: 'nowrap', boxSizing: 'border-box', lineHeight: 1 },
+  pillOutline:     { display: 'inline-flex', alignItems: 'center', height: 22, fontSize: 11, fontWeight: 700, padding: '0 10px', borderRadius: 999, border: '1.5px solid', background: 'transparent', whiteSpace: 'nowrap', boxSizing: 'border-box', lineHeight: 1 },
 
-  // Meet & Greet scheduled strip (orange)
-  mgStrip:         { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '7px 12px', marginBottom: 12, flexWrap: 'wrap' as const },
-  mgFlag:          { fontSize: 12, fontWeight: 700, color: COLORS.meetGreet },
-  mgDate:          { fontSize: 12, fontWeight: 600, color: '#9a3412' },
+  // Bottom section — fills remaining height; content vertically centered.
+  bottomSection:   { flex: 1, display: 'flex', alignItems: 'center', padding: '0 20px', minHeight: 0 },
+  bottomActive:    { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'nowrap' as const },
+  bottomLeft:      { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 },
+  bottomInactive:  { width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textAlign: 'center' as const },
 
-  // Footer: status + service badge + date/time (left), money (right)
-  // marginTop:auto anchors the bottom block flush to the card bottom, with the
-  // dog list filling the space above — consistent across 1-, 2-, and 3-dog cards.
-  // No wrap: keep the amount pinned bottom-right. The left column flexes/shrinks
-  // (badges wrap within it) so a wide badge row never pushes the price to a new line.
-  footer:          { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10, marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #f3f4f6', flexWrap: 'nowrap' as const },
-  footerLeft:      { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 },
-  footerBadges:    { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const },
-  statusPill:      { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' as const },
-  dateTime:        { display: 'flex', flexDirection: 'column', gap: 2 },
-  dateText:        { fontSize: 14, fontWeight: 700, color: '#111827' },
-  timeRow:         { display: 'flex', gap: 14, fontSize: 13, fontWeight: 600, color: '#374151' },
-  inactiveText:    { fontSize: 13, color: '#9ca3af', fontWeight: 500 },
-  footerRight:     { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 },
-  amount:          { fontSize: 15, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap' as const },
-  amountSub:       { fontSize: 12, color: '#6b7280', fontWeight: 600 },
+  // Status as plain small gray text (not a pill)
+  statusText:      { fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' },
+  badgeRow:        { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const },
+  // Service type — SOLID filled pill, white text.
+  svcBadge:        { display: 'inline-flex', alignItems: 'center', height: 22, fontSize: 11, fontWeight: 700, padding: '0 10px', borderRadius: 999, color: '#fff', whiteSpace: 'nowrap', boxSizing: 'border-box', lineHeight: 1 },
+  longStay:        { display: 'inline-flex', alignItems: 'center', height: 22, fontSize: 11, fontWeight: 700, padding: '0 10px', borderRadius: 999, color: '#fff', background: 'var(--status-long-stay)', whiteSpace: 'nowrap', boxSizing: 'border-box', lineHeight: 1 },
 
-  notePreview:     { margin: '10px 0 0', fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' },
+  dateBlock:       { display: 'flex', flexDirection: 'column', gap: 1, marginTop: 2 },
+  dateLine:        { fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' },
+  timeLine:        { fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' },
+  subLine:         { fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' },
+
+  inactiveText:    { fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 },
+  inactiveBalance: { fontSize: 13, fontWeight: 700, color: 'var(--warning)' },
+
+  bottomRight:     { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 },
+  amount:          { fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap' as const },
+  amountSub:       { fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 },
 }

@@ -1,11 +1,19 @@
 'use client'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase'
-import { calculatePrice, MaxStayExceededError } from '@/lib/pricing-engine'
+import { calculatePrice, getHolidayDateRange, MaxStayExceededError } from '@/lib/pricing-engine'
 import type { RateTable, PaymentMethod, ServiceType } from '@/lib/pricing-engine'
 import { VENMO_USERNAME } from '@/lib/payment'
 import DatePicker from '@/components/booking/DatePicker'
 import TimePicker from '@/components/booking/TimePicker'
+import { FeeBreakdownModal } from '@/components/staff/FeeBreakdownModal'
+import { ServicePill } from '@/components/shared/molecules/ServicePill'
+import { StatusBadge, type StatusType } from '@/components/shared/molecules/StatusBadge'
+
+// DB status keys (underscore) → StatusBadge molecule keys (hyphen)
+const STATUS_KEY: Record<string, StatusType> = {
+  upcoming: 'upcoming', in_progress: 'in-progress', completed: 'completed', cancelled: 'cancelled',
+}
 
 const SUPABASE_URL      = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -18,13 +26,7 @@ interface Reservation {
   care_notes: string | null; dogs: string[]; dog_ids: string[]
 }
 
-const SVC = { boarding: '#0058A0', daycare: '#C5A92B' }
-const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  upcoming:    { bg: '#eff6ff', color: '#1d4ed8', label: 'Upcoming' },
-  in_progress: { bg: '#f0fdf4', color: '#15803d', label: 'In Progress' },
-  completed:   { bg: '#f3f4f6', color: '#374151', label: 'Completed' },
-  cancelled:   { bg: '#fff1f2', color: '#be123c', label: 'Cancelled' },
-}
+const SVC = { boarding: 'var(--status-boarding)', daycare: 'var(--status-daycare)' }
 function fmtDate(ymd: string) { return new Date(ymd + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }
 function fmtTime(t: string) { if (!t) return ''; const [h, m] = t.split(':').map(Number); return Number.isNaN(h) ? t : `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
 function nights(a: string, b: string) { return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000) }
@@ -35,10 +37,10 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
 }) {
   const supabase = createClient()
   const isBoarding = res.service_type === 'boarding'
-  const st = STATUS_STYLE[res.status] ?? STATUS_STYLE.completed
 
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [showBreakdown, setShowBreakdown] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [paid, setPaid] = useState(res.paid)
@@ -49,7 +51,7 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
   async function togglePaid() {
     const next = !paid
     setPaidBusy(true); setPaid(next); setErr('')
-    const { error } = await supabase.from('reservations').update({ paid: next }).eq('id', res.id)
+    const { error } = await supabase.from('reservations').update({ paid: next, paid_at: next ? new Date().toISOString() : null }).eq('id', res.id)
     setPaidBusy(false)
     if (error) { setPaid(!next); setErr('Could not update paid status — try again.'); return }
     onChanged() // refresh so the section's unpaid total recomputes
@@ -106,17 +108,23 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
     <div style={{ ...s.card, borderLeftColor: res.status === 'cancelled' || res.status === 'completed' ? '#9ca3af' : SVC[res.service_type] }}>
       <div style={s.cardTop}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ ...s.svcBadge, color: SVC[res.service_type], borderColor: SVC[res.service_type] }}>{isBoarding ? '🏠 Boarding' : '🌞 Daycare'}</span>
-          <span style={{ ...s.statusPill, background: st.bg, color: st.color }}>{st.label}</span>
+          <ServicePill type={res.service_type} />
+          <StatusBadge status={STATUS_KEY[res.status] ?? 'completed'} />
           {res.status !== 'cancelled' && (
-            <span style={paid ? s.paidPill : s.unpaidPill}>{paid ? '✅ Paid' : '● Unpaid'}</span>
+            <StatusBadge status={paid ? 'paid' : 'unpaid'} />
           )}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-          <span style={s.price}>${Number(res.total_price).toFixed(2)}</span>
-          {res.price_overridden && <span style={s.overrideBadge}>✎ Overridden</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" onClick={() => setShowBreakdown(true)} className="btn btn-icon" title="View fee breakdown" aria-label="View fee breakdown" style={{ fontSize: 16, color: 'var(--text-secondary)' }}>ⓘ</button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+            <span style={s.price}>${Number(res.total_price).toFixed(2)}</span>
+            {res.price_overridden && <span style={s.overrideBadge}>✎ Overridden</span>}
+          </div>
         </div>
       </div>
+      {showBreakdown && (
+        <FeeBreakdownModal reservationId={res.id} onClose={() => setShowBreakdown(false)} />
+      )}
       {res.dogs.length > 0 && <p style={s.dogs}>{res.dogs.join(', ')}</p>}
       <div style={s.dates}>
         <span><b style={s.dlabel}>Drop-off</b> {fmtDate(res.dropoff_date)} · {fmtTime(res.dropoff_time)}</span>
@@ -132,14 +140,14 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
         <div style={s.actions}>
           {confirming ? (
             <>
-              <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>Cancel this reservation?</span>
-              <button type="button" onClick={cancel} disabled={busy} style={s.yes}>{busy ? 'Cancelling…' : 'Yes, cancel'}</button>
-              <button type="button" onClick={() => setConfirming(false)} disabled={busy} style={s.no}>Keep</button>
+              <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>Cancel this booking?</span>
+              <button type="button" onClick={cancel} disabled={busy} className="btn btn-destructive btn-xs">{busy ? 'Cancelling…' : 'Yes, cancel'}</button>
+              <button type="button" onClick={() => setConfirming(false)} disabled={busy} className="btn btn-ghost btn-xs">Keep</button>
             </>
           ) : (
             <>
               <button type="button" onClick={togglePaid} disabled={paidBusy}
-                style={{ ...(paid ? s.markUnpaidBtn : s.markPaidBtn), opacity: paidBusy ? 0.6 : 1, cursor: paidBusy ? 'not-allowed' : 'pointer' }}>
+                className={paid ? 'btn btn-ghost btn-xs' : 'btn btn-success btn-xs'}>
                 {paid ? 'Mark Unpaid' : 'Mark Paid'}
               </button>
               {!paid && (
@@ -152,8 +160,8 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
                   ))}
                 </span>
               )}
-              <button type="button" onClick={() => { setEditing(true); setErr('') }} style={s.editBtn}>Edit</button>
-              <button type="button" onClick={() => { setConfirming(true); setErr('') }} style={s.cancelBtn}>Cancel Reservation</button>
+              <button type="button" onClick={() => { setEditing(true); setErr('') }} className="btn btn-outlined btn-xs">Edit</button>
+              <button type="button" onClick={() => { setConfirming(true); setErr('') }} className="btn btn-destructive-outlined btn-xs">Cancel Booking</button>
             </>
           )}
         </div>
@@ -168,6 +176,11 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
   meetGreetCompleted: boolean; onCreated: () => void; onClose: () => void
 }) {
   const supabase = createClient()
+  const holidayDates = useMemo(() => {
+    const from = new Date().toISOString().slice(0, 10)
+    const to   = `${new Date().getFullYear() + 3}-12-31`
+    return getHolidayDateRange(from, to)
+  }, [])
   const [service, setService] = useState<ServiceType>('boarding')
   const [selDogs, setSelDogs] = useState<Set<string>>(new Set(dogs.length === 1 ? [dogs[0].id] : []))
   const [dropDate, setDropDate] = useState<string | null>(null)
@@ -221,15 +234,15 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
     })
     const json = await resp.json().catch(() => ({}))
     setSubmitting(false)
-    if (!resp.ok) { setErr(json.error ?? 'Could not create reservation.'); return }
+    if (!resp.ok) { setErr(json.error ?? 'Could not create booking.'); return }
     onCreated()
   }
 
   return (
     <div style={s.form}>
       <div style={s.formHead}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>New Reservation</h3>
-        <button type="button" onClick={onClose} style={s.no}>Close</button>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>New Booking</h3>
+        <button type="button" onClick={onClose} className="btn btn-ghost btn-sm">Close</button>
       </div>
 
       {!meetGreetCompleted && (
@@ -260,9 +273,9 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
       </div>
 
       <div style={s.pickerRow}>
-        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} holidayDates={holidayDates} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
         {service === 'boarding' && (
-          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} holidayDates={holidayDates} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
         )}
       </div>
       {/* Both daycare AND boarding capture drop-off + pick-up time (matches client flow) */}
@@ -296,8 +309,8 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
 
       {err && <p style={{ margin: 0, fontSize: 13, color: '#ef4444' }}>{err}</p>}
       <button type="button" onClick={submit} disabled={submitting || !meetGreetCompleted}
-        style={{ ...s.submit, opacity: (submitting || !meetGreetCompleted) ? 0.5 : 1, cursor: (submitting || !meetGreetCompleted) ? 'not-allowed' : 'pointer' }}>
-        {submitting ? 'Creating…' : 'Create Reservation'}
+        className="btn btn-booking">
+        {submitting ? 'Submitting…' : 'Submit'}
       </button>
     </div>
   )
@@ -314,6 +327,11 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
   onSaved: () => void; onClose: () => void
 }) {
   const supabase = createClient()
+  const holidayDates = useMemo(() => {
+    const from = new Date().toISOString().slice(0, 10)
+    const to   = `${new Date().getFullYear() + 3}-12-31`
+    return getHolidayDateRange(from, to)
+  }, [])
   const [service, setService]   = useState<ServiceType>(res.service_type)
   const [selDogs, setSelDogs]   = useState<Set<string>>(new Set(res.dog_ids))
   const [dropDate, setDropDate] = useState<string | null>(res.dropoff_date)
@@ -381,8 +399,8 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
   return (
     <div style={s.form}>
       <div style={s.formHead}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Edit Reservation</h3>
-        <button type="button" onClick={onClose} style={s.no}>Close</button>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Edit Booking</h3>
+        <button type="button" onClick={onClose} className="btn btn-ghost btn-sm">Close</button>
       </div>
 
       <div style={s.fieldRow}>
@@ -409,9 +427,9 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
       </div>
 
       <div style={s.pickerRow}>
-        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={blocked} holidayDates={holidayDates} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
         {service === 'boarding' && (
-          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={blocked} holidayDates={holidayDates} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
         )}
       </div>
       <div style={s.fieldRow}>
@@ -449,7 +467,7 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
 
       {err && <p style={{ margin: 0, fontSize: 13, color: '#ef4444' }}>{err}</p>}
       <button type="button" onClick={save} disabled={saving}
-        style={{ ...s.submit, opacity: saving ? 0.5 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+        className="btn btn-primary">
         {saving ? 'Saving…' : 'Save Changes'}
       </button>
     </div>
@@ -491,7 +509,7 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
     const [resR, bdR, rtR] = await Promise.all([
       supabase.from('reservations')
         .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, price_overridden, paid, care_notes')
-        .eq('client_id', clientId).order('dropoff_date', { ascending: false }),
+        .eq('client_id', clientId).order('dropoff_date', { ascending: true }),
       supabase.from('blocked_dates').select('date'),
       supabase.rpc('get_pricing_rates'),
     ])
@@ -522,22 +540,20 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
   return (
     <div style={s.section}>
       <div style={s.sectionHead}>
-        <h2 style={s.sectionTitle}>Reservations{!loading ? ` (${reservations.length})` : ''}</h2>
-        {!showNew && <button type="button" onClick={() => setShowNew(true)} style={s.newBtn}>+ New Reservation</button>}
+        <h2 style={s.sectionTitle}>Bookings{!loading ? ` (${reservations.length})` : ''}</h2>
+        {!showNew && <button type="button" onClick={() => setShowNew(true)} className="btn btn-booking btn-sm">+ New Booking</button>}
       </div>
 
       {!loading && unpaidTotal > 0 && (
         <div style={s.balanceBar}>
           <span style={s.balanceText}>Outstanding balance: <b>${unpaidTotal.toFixed(2)}</b></span>
-          {reminderState === 'sent' ? (
-            <span style={s.reminderSent}>✓ Reminder sent</span>
-          ) : (
-            <button type="button" onClick={sendReminder} disabled={reminderState === 'sending'}
-              style={{ ...s.reminderBtn, opacity: reminderState === 'sending' ? 0.6 : 1, cursor: reminderState === 'sending' ? 'not-allowed' : 'pointer' }}>
-              {reminderState === 'sending' ? 'Sending…' : '🔔 Send payment reminder'}
-            </button>
-          )}
-          {reminderState === 'error' && <span style={{ fontSize: 12, color: '#dc2626' }}>Could not send — try again.</span>}
+          {reminderState === 'sent'
+            ? <span style={s.reminderSent}>✓ Reminder sent</span>
+            : reminderState === 'error'
+              ? <span style={{ fontSize: 12, color: 'var(--error)' }}>Could not send — try again.</span>
+              : <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                  Send payment reminder — coming soon
+                </span>}
         </div>
       )}
 
@@ -551,7 +567,7 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
       )}
 
       {loading ? <p style={{ fontSize: 13, color: '#9ca3af' }}>Loading…</p>
-        : reservations.length === 0 ? <p style={{ fontSize: 13, color: '#9ca3af' }}>No reservations yet.</p>
+        : reservations.length === 0 ? <p style={{ fontSize: 13, color: '#9ca3af' }}>No bookings yet.</p>
         : reservations.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} dogs={dogs} blocked={blocked} rates={rates} onChanged={afterChange} />)}
     </div>
   )
@@ -561,10 +577,9 @@ const s: Record<string, React.CSSProperties> = {
   section:      { },
   sectionHead:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' },
   sectionTitle: { margin: 0, fontSize: 15, fontWeight: 700, color: '#111827' },
-  newBtn:       { fontSize: 13, fontWeight: 600, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontFamily: 'inherit' },
-  card:         { background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', borderLeft: '4px solid', padding: '16px 18px', marginBottom: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  card:         { background: '#fff', borderRadius: 'var(--radius-card)', border: '1px solid #e5e7eb', borderLeft: '4px solid', padding: '16px 18px', marginBottom: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
   cardTop:      { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
-  svcBadge:     { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1.5px solid', background: 'transparent' },
+  svcBadge:     { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: 'none' },
   statusPill:   { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10 },
   price:        { fontSize: 17, fontWeight: 800, color: '#111827' },
   dogs:         { margin: '0 0 8px', fontSize: 14, fontWeight: 600, color: '#111827' },
@@ -572,24 +587,17 @@ const s: Record<string, React.CSSProperties> = {
   dlabel:       { color: '#9ca3af', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', marginRight: 6 },
   care:         { margin: '8px 0 0', fontSize: 13, color: '#6b7280', fontStyle: 'italic', background: '#f9fafb', borderRadius: 6, padding: '6px 10px' },
   actions:      { marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  editBtn:      { fontSize: 12, fontWeight: 600, color: '#374151', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
-  cancelBtn:    { fontSize: 12, fontWeight: 600, color: '#be123c', background: '#fff', border: '1px solid #fecdd3', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
   overrideBadge:{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' },
   overrideTag:  { fontSize: 12, fontWeight: 600, color: '#92400e' },
   paidPill:     { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#f0fdf4', color: '#15803d' },
   unpaidPill:   { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#fffbeb', color: '#b45309' },
-  markPaidBtn:  { fontSize: 12, fontWeight: 600, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 6, padding: '5px 12px', fontFamily: 'inherit' },
-  markUnpaidBtn:{ fontSize: 12, fontWeight: 600, color: '#92400e', background: '#fff', border: '1px solid #fde68a', borderRadius: 6, padding: '5px 12px', fontFamily: 'inherit' },
   pmToggle:     { display: 'inline-flex', border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden' },
   pmSeg:        { fontSize: 12, fontWeight: 600, color: '#6b7280', background: '#fff', border: 'none', padding: '5px 10px', fontFamily: 'inherit' },
   pmSegOn:      { background: '#eff6ff', color: '#1d4ed8' },
   balanceBar:   { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 14px', marginBottom: 12 },
   balanceText:  { fontSize: 13, color: '#92400e' },
-  reminderBtn:  { fontSize: 12, fontWeight: 700, color: '#fff', background: '#d97706', border: 'none', borderRadius: 999, padding: '6px 14px', fontFamily: 'inherit' },
   reminderSent: { fontSize: 12, fontWeight: 700, color: '#15803d' },
-  yes:          { fontSize: 12, fontWeight: 600, color: '#fff', background: '#be123c', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
-  no:           { fontSize: 12, fontWeight: 600, color: '#374151', background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' },
-  form:         { background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 12, padding: '18px 20px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 },
+  form:         { background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '18px 20px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 },
   formHead:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   warn:         { margin: 0, fontSize: 13, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 12px' },
   fieldRow:     { display: 'flex', gap: 10, flexWrap: 'wrap' },
@@ -599,5 +607,4 @@ const s: Record<string, React.CSSProperties> = {
   pickerRow:    { display: 'flex', gap: 16, flexWrap: 'wrap' },
   input:        { fontSize: 14, padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', marginTop: 2 },
   priceBox:     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4 },
-  submit:       { fontSize: 15, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 10, padding: '11px 0', fontFamily: 'inherit' },
 }

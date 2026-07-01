@@ -26,7 +26,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
 
 const s: Record<string, React.CSSProperties> = {
   page:      { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fff' },
-  card:      { background: '#fff', borderRadius: 16, padding: '40px 36px', width: '100%', maxWidth: 440, boxShadow: '0 4px 24px rgba(0,0,0,0.08)', textAlign: 'center' },
+  card:      { background: '#fff', borderRadius: 'var(--radius-card)', padding: '40px 36px', width: '100%', maxWidth: 440, boxShadow: '0 4px 24px rgba(0,0,0,0.08)', textAlign: 'center' },
   title:     { margin: '16px 0 8px', fontSize: 24, fontWeight: 800, color: '#111827' },
   body:      { margin: '0 0 12px', fontSize: 15, lineHeight: 1.6, color: '#6b7280' },
   detail:    { margin: '0 0 20px', fontSize: 13, color: '#9ca3af', fontFamily: 'monospace', wordBreak: 'break-word' },

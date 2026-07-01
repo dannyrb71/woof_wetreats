@@ -54,7 +54,7 @@ function ConfirmationContent() {
         .eq('id', id)
         .single()
 
-      if (resErr || !res) { setError('Reservation not found.'); setLoading(false); return }
+      if (resErr || !res) { setError('Booking not found.'); setLoading(false); return }
       setReservation(res)
 
       // Fetch dog names via reservation_dogs join
@@ -185,7 +185,7 @@ function ConfirmationContent() {
         {/* Actions */}
         <div style={s.actions}>
           <button type="button" onClick={() => router.push('/booking')} style={s.secondaryBtn}>
-            + New reservation
+            + New booking
           </button>
           <button type="button" onClick={() => router.push('/dashboard')} style={s.primaryBtn}>
             Back to dashboard →
@@ -207,12 +207,12 @@ export default function ConfirmationPage() {
 const s: Record<string, React.CSSProperties> = {
   page:          { minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 16px', background: 'var(--page-bg)' },
   center:        { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
-  card:          { background: '#fff', borderRadius: 16, padding: '36px 32px', width: '100%', maxWidth: 520, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
+  card:          { background: '#fff', borderRadius: 'var(--radius-card)', padding: '36px 32px', width: '100%', maxWidth: 520, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   successHeader: { textAlign: 'center', marginBottom: 28 },
   checkCircle:   { width: 56, height: 56, borderRadius: '50%', background: '#dcfce7', color: '#16a34a', fontSize: 24, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' },
   title:         { margin: '0 0 8px', fontSize: 24, fontWeight: 800, color: '#111827' },
   subtitle:      { margin: 0, fontSize: 14, color: '#6b7280', lineHeight: 1.5 },
-  detailsCard:   { background: 'var(--surface-muted)', borderRadius: 12, padding: '20px', marginBottom: 16, border: '1px solid #e5e7eb' },
+  detailsCard:   { background: 'var(--surface-muted)', borderRadius: 'var(--radius-card)', padding: '20px', marginBottom: 16, border: '1px solid #e5e7eb' },
   detailRow:     { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '6px 0' },
   detailLabel:   { fontSize: 13, color: '#6b7280', flexShrink: 0 },
   detailValue:   { fontSize: 14, fontWeight: 600, color: '#111827', textAlign: 'right' },

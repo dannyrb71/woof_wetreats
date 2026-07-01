@@ -216,7 +216,7 @@ export async function POST(req: NextRequest) {
 
   if (resErr || !reservation) {
     console.error('reservation insert error:', resErr)
-    return NextResponse.json({ error: 'Failed to create reservation' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }
 
   // 8. Insert reservation_dogs join rows
@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
     // Roll back the reservation if dog links fail
     await supabase.from('reservations').delete().eq('id', reservation.id)
     console.error('reservation_dogs insert error:', rdErr)
-    return NextResponse.json({ error: 'Failed to link dogs to reservation' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to link dogs to booking' }, { status: 500 })
   }
 
   // Notification fires automatically via the DB trigger on reservations INSERT.

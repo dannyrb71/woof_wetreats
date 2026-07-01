@@ -1,8 +1,8 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { calculatePrice } from '@/lib/pricing-engine'
+import { calculatePrice, getHolidayDateRange } from '@/lib/pricing-engine'
 import type { PricingResult, PaymentMethod, ServiceType, RateTable } from '@/lib/pricing-engine'
 import DatePicker from './DatePicker'
 import TimePicker from './TimePicker'
@@ -48,6 +48,13 @@ export default function BookingForm() {
   const [pricing,      setPricing]      = useState<PricingResult | null>(null)
   const [pricingError, setPricingError] = useState('')
   const [rates,        setRates]        = useState<RateTable | null>(null)
+
+  // Holiday dates for the next 2 years — computed once, no I/O required.
+  const holidayDates = useMemo(() => {
+    const from = new Date().toISOString().slice(0, 10)
+    const to   = `${new Date().getFullYear() + 2}-12-31`
+    return getHolidayDateRange(from, to)
+  }, [])
 
   // ── Load dogs, blocked dates, and client default care notes ─
   useEffect(() => {
@@ -180,7 +187,7 @@ export default function BookingForm() {
         <div style={s.toggle}>
           {(['boarding', 'daycare'] as ServiceType[]).map(svc => (
             <button key={svc} type="button"
-              style={{ ...s.toggleBtn, ...(service === svc ? s.toggleActive : {}) }}
+              style={{ ...s.toggleBtn, ...(service === svc ? { ...s.toggleActive, background: svc === 'boarding' ? 'var(--status-boarding)' : 'var(--status-daycare)' } : {}) }}
               onClick={() => { setService(svc); setDropoffDate(null); setPickupDate(null) }}
             >
               {svc === 'boarding' ? '🏠 Boarding' : '🌞 Daycare'}
@@ -197,14 +204,14 @@ export default function BookingForm() {
             <>
               <div style={s.calCol}>
                 <DatePicker label="Drop-off date" value={dropoffDate} onChange={handleDropoffChange}
-                  blockedDates={blockedDates} rangeStart={dropoffDate} rangeEnd={pickupDate} minDate={todayStr} />
+                  blockedDates={blockedDates} holidayDates={holidayDates} rangeStart={dropoffDate} rangeEnd={pickupDate} minDate={todayStr} />
                 <div style={{ marginTop: 10 }}>
                   <TimePicker label="Drop-off time" value={dropoffTime} onChange={setDropoffTime} />
                 </div>
               </div>
               <div style={s.calCol}>
                 <DatePicker label="Pick-up date" value={pickupDate} onChange={setPickupDate}
-                  blockedDates={blockedDates} rangeStart={dropoffDate} rangeEnd={pickupDate}
+                  blockedDates={blockedDates} holidayDates={holidayDates} rangeStart={dropoffDate} rangeEnd={pickupDate}
                   minDate={dropoffDate ?? todayStr} />
                 <div style={{ marginTop: 10 }}>
                   <TimePicker label="Pick-up time" value={pickupTime} onChange={setPickupTime} />
@@ -214,7 +221,7 @@ export default function BookingForm() {
           ) : (
             <div style={s.calCol}>
               <DatePicker label="Date" value={dropoffDate} onChange={setDropoffDate}
-                blockedDates={blockedDates} minDate={todayStr} />
+                blockedDates={blockedDates} holidayDates={holidayDates} minDate={todayStr} />
               <div style={{ marginTop: 10, display: 'flex', gap: 16 }}>
                 <TimePicker label="Drop-off time" value={dropoffTime} onChange={setDropoffTime} />
                 <TimePicker label="Pick-up time"  value={pickupTime}  onChange={setPickupTime} />
@@ -241,12 +248,12 @@ export default function BookingForm() {
       <section style={s.section}>
         <h3 style={s.sectionTitle}>Dog(s)</h3>
         {dogs.length === 0
-          ? <p style={s.hint}>No dogs on your account yet. <a href="/onboarding" style={{ color: '#2563eb' }}>Add one</a>.</p>
+          ? <p style={s.hint}>No dogs on your account yet. <a href="/onboarding" style={{ color: 'var(--primary)' }}>Add one</a>.</p>
           : dogs.map(dog => (
             <label key={dog.id} style={s.checkRow}>
               <input type="checkbox" checked={selectedDogs.has(dog.id)}
                 onChange={() => toggleDog(dog.id)}
-                style={{ accentColor: '#2563eb', width: 16, height: 16 }} />
+                style={{ accentColor: 'var(--primary)', width: 16, height: 16 }} />
               <span style={s.dogName}>{dog.name}</span>
               <span style={s.dogBirth}>{dog.birthdate}</span>
             </label>
@@ -343,7 +350,7 @@ export default function BookingForm() {
 
       {/* ── Terms agreement (shown on every submission) ───── */}
       <p style={s.termsNotice}>
-        By clicking Request Booking, you agree to our{' '}
+        By clicking Submit, you agree to our{' '}
         <a href="/terms" target="_blank" rel="noopener noreferrer" style={s.termsLink}>
           Terms of Service
         </a>.
@@ -354,9 +361,10 @@ export default function BookingForm() {
         type="button"
         onClick={handleSubmit}
         disabled={!canSubmit}
-        style={{ ...s.submitBtn, ...(!canSubmit ? s.submitDisabled : {}) }}
+        className="btn btn-booking"
+        style={{ marginTop: 8, width: '100%' }}
       >
-        {submitting ? 'Submitting…' : 'Request Booking'}
+        {submitting ? 'Submitting…' : 'Submit'}
       </button>
     </div>
   )
@@ -370,7 +378,7 @@ const s: Record<string, React.CSSProperties> = {
   optional:      { fontWeight: 400, color: '#9ca3af', fontSize: 13 },
   toggle:        { display: 'flex', gap: 8 },
   toggleBtn:     { padding: '8px 18px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', color: '#374151' },
-  toggleActive:  { background: '#2563eb', color: '#fff', border: '1px solid #2563eb', fontWeight: 600 },
+  toggleActive:  { background: 'var(--primary)', color: '#fff', border: '1px solid transparent', fontWeight: 600 },
   calRow:        { display: 'flex', gap: 20, flexWrap: 'wrap' },
   calCol:        { display: 'flex', flexDirection: 'column' },
   checkRow:      { display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', cursor: 'pointer' },
@@ -378,10 +386,10 @@ const s: Record<string, React.CSSProperties> = {
   dogBirth:      { fontSize: 12, color: '#9ca3af' },
   hint:          { fontSize: 13, color: '#6b7280', margin: '4px 0 0' },
   textarea:      { width: '100%', borderRadius: 8, border: '1px solid #e5e7eb', padding: '10px 12px', fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit', resize: 'vertical', color: '#111827', boxSizing: 'border-box' },
-  priceBox:      { background: 'var(--surface-muted)', borderRadius: 12, padding: 16, border: '1px solid #e5e7eb', marginTop: 4 },
+  priceBox:      { background: 'var(--surface-muted)', borderRadius: 'var(--radius-card)', padding: 16, border: '1px solid #e5e7eb', marginTop: 4 },
   totalRow:      { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10 },
   totalLabel:    { fontWeight: 600, fontSize: 15, color: '#111827' },
-  totalAmount:   { fontWeight: 700, fontSize: 24, color: '#2563eb' },
+  totalAmount:   { fontWeight: 700, fontSize: 24, color: 'var(--primary)' },
   priceDetail:   { margin: '2px 0 8px', fontSize: 12, color: '#6b7280' },
   longStayNote:  { margin: '2px 0 10px', fontSize: 12.5, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 },
   breakdown:     { borderTop: '1px solid #e5e7eb', paddingTop: 8, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 },
@@ -391,8 +399,6 @@ const s: Record<string, React.CSSProperties> = {
   rangeWarning:     { display: 'flex', gap: 10, alignItems: 'flex-start', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '12px 14px', margin: '4px 0' },
   rangeWarningIcon: { fontSize: 16, flexShrink: 0, marginTop: 1 },
   rangeWarningText: { margin: 0, fontSize: 13, color: '#78350f', lineHeight: 1.5 },
-  submitBtn:     { marginTop: 8, padding: '13px 0', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
-  submitDisabled:{ background: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' },
   termsNotice:   { margin: '20px 0 0', fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 1.5 },
-  termsLink:     { color: '#2563eb', fontWeight: 600, textDecoration: 'underline' },
+  termsLink:     { color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' },
 }

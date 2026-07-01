@@ -155,7 +155,7 @@ function Step4({ dogs, onChange, onAdd, onRemove, onPhoto, photoPreviews }: {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <strong style={{ fontSize: 14 }}>Dog {i + 1}</strong>
             {dogs.length > 1 && (
-              <button type="button" onClick={() => onRemove(i)} style={s.removeBtn}>Remove</button>
+              <button type="button" onClick={() => onRemove(i)} className="btn btn-destructive-outlined btn-xs">Remove</button>
             )}
           </div>
           <DogPhotoInput
@@ -385,11 +385,11 @@ export default function OnboardingPage() {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
             {step > 1 && step < 4 && (
-              <button type="button" onClick={() => setStep(s => s - 1)} style={s.backBtn}>
+              <button type="button" onClick={() => setStep(s => s - 1)} className="btn btn-ghost">
                 Back
               </button>
             )}
-            <button type="submit" disabled={loading} style={{ ...s.nextBtn, flex: 1 }}>
+            <button type="submit" disabled={loading} className="btn btn-primary" style={{ flex: 1 }}>
               {loading ? 'Saving…' : step < 3 ? 'Continue' : step === 3 ? 'Save & Continue' : 'Finish'}
             </button>
           </div>
@@ -407,16 +407,12 @@ export default function OnboardingPage() {
 
 const s: Record<string, React.CSSProperties> = {
   page:     { minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px' },
-  card:     { background: '#fff', borderRadius: 16, padding: '36px 32px', width: '100%', maxWidth: 480, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
+  card:     { background: '#fff', borderRadius: 'var(--radius-card)', padding: '36px 32px', width: '100%', maxWidth: 480, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   heading:  { margin: '0 0 20px', fontSize: 22, fontWeight: 700 },
   stepHint: { margin: '0 0 14px', fontSize: 14, color: '#6b7280' },
   label:    { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14, fontWeight: 500 },
   input:    { padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14, outline: 'none', fontFamily: 'inherit' },
   error:    { color: '#ef4444', fontSize: 13, margin: 0 },
-  nextBtn:  { padding: '11px 0', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: 'pointer' },
-  backBtn:  { padding: '11px 16px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 8, fontSize: 15, cursor: 'pointer' },
-  skipBtn:  { background: 'none', border: 'none', color: '#6b7280', fontSize: 13, cursor: 'pointer', textDecoration: 'underline', textAlign: 'center', padding: 0 },
-  dogCard:  { background: 'var(--surface-muted)', border: '1px solid #e5e7eb', borderRadius: 10, padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 },
+  dogCard:  { background: 'var(--surface-muted)', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 },
   addDogBtn:{ background: 'none', border: '1px dashed #d1d5db', borderRadius: 8, padding: '10px', fontSize: 14, color: '#2563eb', cursor: 'pointer', marginTop: 4 },
-  removeBtn:{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', padding: 0 },
 }

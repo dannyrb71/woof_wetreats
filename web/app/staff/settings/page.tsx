@@ -4,15 +4,13 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { SiteNav } from '@/components/SiteNav'
 import { LandingHeroUploader } from '@/components/staff/LandingHeroUploader'
-import { BlockedDatesCalendar } from '@/components/staff/BlockedDatesCalendar'
 import { StaffManager } from '@/components/staff/StaffManager'
 import { PricingEditor } from '@/components/staff/PricingEditor'
 import { LandingCopyEditor } from '@/components/staff/LandingCopyEditor'
 
-type TabKey = 'landing' | 'availability' | 'pricing' | 'staff'
+type TabKey = 'landing' | 'pricing' | 'staff'
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'availability', label: 'Availability' },
   { key: 'pricing',      label: 'Pricing' },
   { key: 'staff',        label: 'Staff' },
   { key: 'landing',      label: 'Landing Page' },
@@ -22,7 +20,7 @@ export default function StaffSettingsPage() {
   const router   = useRouter()
   const supabase = createClient()
   const [ready, setReady] = useState(false)
-  const [tab,   setTab]   = useState<TabKey>('availability')
+  const [tab,   setTab]   = useState<TabKey>('pricing')
 
   useEffect(() => {
     async function guard() {
@@ -62,7 +60,7 @@ export default function StaffSettingsPage() {
         <section style={s.sectionCard}>
           {tab === 'landing' && (
             <>
-              <h3 style={s.sectionTitle}>Landing page photo</h3>
+              <h3 className="section-label" style={{ margin: '0 0 12px' }}>Landing page photo</h3>
               <p style={s.sectionHint}>
                 The featured photo at the top of the public landing page visitors see before logging in.
               </p>
@@ -70,7 +68,7 @@ export default function StaffSettingsPage() {
 
               <div style={{ height: 1, background: '#e5e7eb', margin: '28px 0' }} />
 
-              <h3 style={s.sectionTitle}>Landing page copy</h3>
+              <h3 className="section-label" style={{ margin: '0 0 12px' }}>Landing page copy</h3>
               <p style={s.sectionHint}>
                 The headline and intro paragraphs shown on the public landing page.
               </p>
@@ -78,23 +76,16 @@ export default function StaffSettingsPage() {
             </>
           )}
 
-          {tab === 'availability' && (
-            <>
-              <h3 style={s.sectionTitle}>Blocked dates</h3>
-              <BlockedDatesCalendar />
-            </>
-          )}
-
           {tab === 'pricing' && (
             <>
-              <h3 style={s.sectionTitle}>Pricing rates</h3>
+              <h3 className="section-label" style={{ margin: '0 0 12px' }}>Pricing rates</h3>
               <PricingEditor />
             </>
           )}
 
           {tab === 'staff' && (
             <>
-              <h3 style={s.sectionTitle}>Staff members</h3>
+              <h3 className="section-label" style={{ margin: '0 0 12px' }}>Staff members</h3>
               <StaffManager />
             </>
           )}
@@ -119,8 +110,8 @@ const s: Record<string, React.CSSProperties> = {
   pageTitle:   { margin: '0 0 20px', fontSize: 22, fontWeight: 800, color: '#111827' },
   tabBar:      { display: 'flex', gap: 4, borderBottom: '1px solid #e5e7eb', marginBottom: 24 },
   tab:         { fontSize: 14, fontWeight: 600, color: '#6b7280', background: 'none', border: 'none', borderBottom: '2px solid transparent', padding: '10px 16px', cursor: 'pointer', fontFamily: 'inherit', marginBottom: -1 },
-  tabActive:   { color: '#2563eb', borderBottomColor: '#2563eb' },
-  sectionCard: { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: '24px 26px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  tabActive:   { color: 'var(--dog-male)', borderBottomColor: 'var(--dog-male)' },
+  sectionCard: { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '24px 26px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
   sectionTitle:{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#111827' },
   sectionHint: { margin: '0 0 18px', fontSize: 14, color: '#6b7280', lineHeight: 1.6 },
 }

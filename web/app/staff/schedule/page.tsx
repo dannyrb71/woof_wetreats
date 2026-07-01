@@ -2,11 +2,15 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { COLORS } from '@/components/staff/HouseholdCard'
 import type { Household, DogRow } from '@/components/staff/HouseholdCard'
 import { HouseholdDetail } from '@/components/staff/HouseholdDetail'
-import { DogAvatar } from '@/components/staff/DogAvatar'
 import { SiteNav } from '@/components/SiteNav'
+import { BlockedDatesCalendar } from '@/components/staff/BlockedDatesCalendar'
+import { DateNavigator } from '@/components/shared/molecules/DateNavigator'
+import { ServicePill, type ServiceType } from '@/components/shared/molecules/ServicePill'
+import { FeeBreakdownModal } from '@/components/staff/FeeBreakdownModal'
+import { formatPhone } from '@/lib/format'
+import { dogNameColor } from '@/lib/dog-colors'
 
 // ── Types ──────────────────────────────────────────────────────
 interface ScheduleDog {
@@ -37,90 +41,121 @@ interface ScheduleRow {
 }
 
 // ── Helpers ────────────────────────────────────────────────────
-const IN_PROGRESS_COLOR = '#16a34a'
-
 function todayStr(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-
 function fmtTime(t: string | null): string {
   if (!t) return ''
   const [h, m] = t.split(':').map(Number)
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
 }
-
 function fmtDateLong(ymd: string): string {
-  const d = new Date(ymd + 'T00:00:00')
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  return new Date(ymd + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
-
 function fmtDateShort(ymd: string): string {
-  const d = new Date(ymd + 'T00:00:00')
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return new Date(ymd + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
-
 function shiftDate(ymd: string, days: number): string {
   const d = new Date(ymd + 'T00:00:00')
   d.setDate(d.getDate() + days)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-
-const ACTIVITY: Record<ScheduleRow['activity_type'], { label: string; color: string }> = {
-  arrival:     { label: '⬇ Arrival',     color: COLORS.boarding },
-  departure:   { label: '⬆ Departure',   color: COLORS.boarding },
-  daycare:     { label: '🌞 Daycare',     color: COLORS.daycare },
-  meet_greet:  { label: '🤝 Meet & Greet', color: COLORS.meetGreet },
-  in_progress: { label: '🏠 Boarding',    color: IN_PROGRESS_COLOR },
+function dayOfStay(dropoff: string, selected: string): number {
+  const a = new Date(dropoff + 'T00:00:00').getTime()
+  const b = new Date(selected + 'T00:00:00').getTime()
+  return Math.round((b - a) / 86400000) + 1
+}
+function totalNights(dropoff: string, pickup: string): number {
+  return Math.round((new Date(pickup + 'T00:00:00').getTime() - new Date(dropoff + 'T00:00:00').getTime()) / 86400000)
 }
 
-// ── Dog list (shared avatar — same size as the staff dashboard) ──
+// ── Service pills ──────────────────────────────────────────────
+// Schedule activity_type keys → shared ServicePill types.
+// (in_progress activity renders as the "Boarding" pill.)
+const ACT_TO_PILL: Record<ScheduleRow['activity_type'], ServiceType> = {
+  arrival:     'arrival',
+  departure:   'departure',
+  daycare:     'daycare',
+  meet_greet:  'meet-greet',
+  in_progress: 'boarding',
+}
+
+// ── Dog list with gender-colored names ─────────────────────────
+const DOG_SIZE = 48
 function DogList({ dogs }: { dogs: ScheduleDog[] }) {
-  if (dogs.length === 0) return <span style={s.noDogs}>—</span>
+  if (dogs.length === 0) return null
   return (
-    <div style={s.dogRow}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
       {dogs.map((d, i) => (
-        <DogAvatar key={i} name={d.name} photoSigned={d.photoSigned} gender={d.gender} />
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: DOG_SIZE }}>
+          {d.photoSigned
+            ? <img src={d.photoSigned} alt={d.name} style={{ width: DOG_SIZE, height: DOG_SIZE, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border)', flexShrink: 0 }} />
+            : <div style={{ width: DOG_SIZE, height: DOG_SIZE, borderRadius: '50%', background: 'var(--surface-muted)', border: '2px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🐕</div>
+          }
+          <span style={{ fontSize: 11, fontWeight: 700, color: dogNameColor(d.gender), textAlign: 'center', lineHeight: 1.2, maxWidth: DOG_SIZE + 16, overflowWrap: 'break-word' }}>{d.name}</span>
+        </div>
       ))}
     </div>
   )
 }
 
-// ── Care-notes one-line preview ────────────────────────────────
-// Signals "there are notes here" without showing the full content. Clicking it
-// falls through to the row's onClick, which opens the existing household detail
-// modal (full care notes live there). Omitted entirely when none on file.
+// ── Care notes preview ─────────────────────────────────────────
 function CareNotesPreview({ notes }: { notes: string | null }) {
-  if (!notes || !notes.trim()) return null
-  const oneLine = notes.replace(/\s+/g, ' ').trim()
-  return <p style={s.carePreview}>📋 {oneLine}</p>
+  if (!notes?.trim()) return null
+  return <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📋 {notes.replace(/\s+/g, ' ').trim()}</p>
 }
 
-// ── Activity row ───────────────────────────────────────────────
-function ActivityRow({ row, onOpen, onToggle }: {
-  row: ScheduleRow
-  onOpen: (clientId: string) => void
-  onToggle: (row: ScheduleRow, next: boolean) => void
+// ── Collapsible section container ─────────────────────────────
+function ScheduleSection({ title, count, open, onToggle, isMobile, children }: {
+  title:    string
+  count:    number
+  open:     boolean
+  onToggle: () => void
+  isMobile: boolean
+  children: React.ReactNode
 }) {
-  const a = ACTIVITY[row.activity_type]
+  return (
+    <div style={s.section}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={isMobile ? onToggle : undefined}
+        onKeyDown={isMobile ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }) : undefined}
+        style={{ ...s.sectionHead, cursor: isMobile ? 'pointer' : 'default' }}
+      >
+        <h3 style={s.sectionTitle}>{title}</h3>
+        <span style={s.countBadge}>{count}</span>
+        {isMobile && (
+          <svg
+            width="20" height="20" viewBox="0 0 20 20" fill="none"
+            style={{ flexShrink: 0, marginLeft: 'auto', display: 'block', transition: 'transform 0.2s ease', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+          >
+            <polyline points="4,7 10,13 16,7" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      <div style={{ display: (!isMobile || open) ? 'flex' : 'none', flexDirection: 'column', gap: 10 }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ── Today's Activity card ──────────────────────────────────────
+function ActivityCard({ row, onOpen, onToggle, onBreakdown }: {
+  row:         ScheduleRow
+  onOpen:      (clientId: string) => void
+  onToggle:    (row: ScheduleRow, next: boolean) => void
+  onBreakdown: (resId: string) => void
+}) {
   const [hovered, setHovered] = useState(false)
-  // Completion toggles apply only to "Activity on this date" items (group 1).
-  const togglable = row.group_num === 1
-  const done = row.completed
-  // A completed BOARDING ARRIVAL is special: the dog hasn't left, the stay has
-  // just started. It must NOT gray out — it turns green and renders in the
-  // In Progress group. (Daycare/departure/meet_greet keep the gray "done" look.)
-  const startedStay = row.activity_type === 'arrival' && done
-  const grayed = done && !startedStay
-  const accent = startedStay ? IN_PROGRESS_COLOR : a.color
-  // When started, present it like an in-progress overnight stay.
-  const badgeLabel = startedStay ? ACTIVITY.in_progress.label : a.label
-  const showSpan = (row.activity_type === 'in_progress' || startedStay) && row.dropoff_date && row.pickup_date
-  // Long-stay flag: boarding stays over 14 nights need a custom flat rate.
-  const nights = row.dropoff_date && row.pickup_date
-    ? Math.round((new Date(row.pickup_date + 'T00:00:00').getTime() - new Date(row.dropoff_date + 'T00:00:00').getTime()) / 86400000)
-    : 0
+  const nights = row.dropoff_date && row.pickup_date ? totalNights(row.dropoff_date, row.pickup_date) : 0
   const longStay = row.service_type === 'boarding' && nights > 14
+  const timeStr = row.activity_type === 'daycare'
+    ? `${fmtTime(row.event_time)}${row.pickup_time ? ` – ${fmtTime(row.pickup_time)}` : ''}`
+    : fmtTime(row.event_time)
+
   return (
     <div
       role="button"
@@ -129,47 +164,144 @@ function ActivityRow({ row, onOpen, onToggle }: {
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(row.client_id) } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        ...s.row,
-        borderLeftColor: grayed ? '#d1d5db' : accent,
-        cursor: 'pointer',
-        opacity: grayed ? 0.6 : 1,
-        background: grayed ? '#f9fafb' : '#fff',
-        boxShadow: hovered ? '0 6px 20px rgba(0,0,0,0.10)' : '0 1px 3px rgba(0,0,0,0.05)',
-        transform: hovered ? 'translateY(-1px)' : 'none',
-        transition: 'all 0.15s ease',
-      }}
+      style={{ ...s.card, boxShadow: hovered ? '0 6px 22px rgba(0,0,0,0.10)' : '0 0 3.5px rgba(0,0,0,0.10)', transform: hovered ? 'translateY(-1px)' : 'none', transition: 'all 0.15s ease' }}
     >
-      <div style={s.rowTop}>
-        <div style={s.rowLeft}>
-          {togglable && (
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={done}
-              aria-label={done ? 'Mark not done' : 'Mark done'}
-              onClick={e => { e.stopPropagation(); onToggle(row, !done) }}
-              style={{ ...s.check, background: done ? (startedStay ? IN_PROGRESS_COLOR : '#16a34a') : '#fff', borderColor: done ? (startedStay ? IN_PROGRESS_COLOR : '#16a34a') : '#d1d5db', color: done ? '#fff' : 'transparent' }}
-            >✓</button>
-          )}
-          <span style={{ ...s.activityBadge, color: grayed ? '#9ca3af' : accent, borderColor: grayed ? '#d1d5db' : accent, textDecoration: grayed ? 'line-through' : 'none' }}>{badgeLabel}</span>
-          {longStay && <span style={s.longStayBadge} title="Stay over 14 nights — confirm custom flat rate">🌙 Long stay</span>}
-          {!startedStay && (row.activity_type === 'daycare'
-            ? <span style={s.time}>{fmtTime(row.event_time)}{row.pickup_time ? ` → ${fmtTime(row.pickup_time)}` : ''}</span>
-            : (row.event_time && <span style={s.time}>{fmtTime(row.event_time)}</span>))}
-          {showSpan && (
-            <span style={s.spanDates}>{fmtDateShort(row.dropoff_date!)} → {fmtDateShort(row.pickup_date!)}</span>
-          )}
+      <div style={s.cardTop}>
+        <div style={s.cardLeft}>
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={false}
+            aria-label="Mark done"
+            onClick={e => { e.stopPropagation(); onToggle(row, true) }}
+            style={s.checkbox}
+          />
+          <ServicePill type={ACT_TO_PILL[row.activity_type]} />
+          {longStay && <ServicePill type="long-stay" />}
+          {timeStr && <span style={s.time}>{timeStr}</span>}
         </div>
-        <div style={s.rowClient}>
-          <span style={s.clientName}>{row.first_name} {row.last_name}</span>
-          {row.phone && (
-            <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{row.phone}</a>
+        <div style={s.cardRight}>
+          {row.reservation_id && (
+            <button type="button" onClick={e => { e.stopPropagation(); onBreakdown(row.reservation_id!) }} className="btn btn-icon" style={{ fontSize: 15, color: 'var(--text-secondary)' }} title="View fee breakdown" aria-label="View fee breakdown">ⓘ</button>
           )}
+          <span style={s.ownerName}>{row.first_name} {row.last_name}</span>
+          {row.phone && <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
         </div>
       </div>
       <CareNotesPreview notes={row.care_notes} />
       <DogList dogs={row.dogs} />
+    </div>
+  )
+}
+
+// ── In Progress card ───────────────────────────────────────────
+function InProgressCard({ row, date, onOpen, onToggle, onBreakdown }: {
+  row:         ScheduleRow
+  date:        string
+  onOpen:      (clientId: string) => void
+  onToggle:    (row: ScheduleRow, next: boolean) => void
+  onBreakdown: (resId: string) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const nights = row.dropoff_date && row.pickup_date ? totalNights(row.dropoff_date, row.pickup_date) : 0
+  const dayNum = row.dropoff_date ? dayOfStay(row.dropoff_date, date) : 1
+  const isDay1of1 = dayNum === 1 && nights === 1
+  const longStay = nights > 14
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(row.client_id)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(row.client_id) } }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ ...s.card, boxShadow: hovered ? '0 6px 22px rgba(0,0,0,0.10)' : '0 0 3.5px rgba(0,0,0,0.10)', transform: hovered ? 'translateY(-1px)' : 'none', transition: 'all 0.15s ease' }}
+    >
+      <div style={s.cardTop}>
+        <div style={s.cardLeft}>
+          {isDay1of1 && (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={false}
+              aria-label="Complete stay"
+              onClick={e => { e.stopPropagation(); onToggle(row, true) }}
+              style={s.checkbox}
+            />
+          )}
+          <ServicePill type="boarding" />
+          {longStay && <ServicePill type="long-stay" />}
+        </div>
+        <div style={s.cardRight}>
+          {row.reservation_id && (
+            <button type="button" onClick={e => { e.stopPropagation(); onBreakdown(row.reservation_id!) }} className="btn btn-icon" style={{ fontSize: 15, color: 'var(--text-secondary)' }} title="View fee breakdown" aria-label="View fee breakdown">ⓘ</button>
+          )}
+          <span style={s.ownerName}>{row.first_name} {row.last_name}</span>
+          {row.phone && <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
+        </div>
+      </div>
+      {row.dropoff_date && row.pickup_date && (
+        <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+          {fmtDateShort(row.dropoff_date)} → {fmtDateShort(row.pickup_date)}
+        </p>
+      )}
+      <DogList dogs={row.dogs} />
+      {row.dropoff_date && row.pickup_date && (
+        <p style={{ margin: '8px 0 0', fontSize: 12, fontWeight: 700, color: 'var(--status-in-progress)' }}>
+          Day {dayNum} of {nights}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ── Completed card ─────────────────────────────────────────────
+function CompletedCard({ row, onOpen, onToggle, onBreakdown }: {
+  row:         ScheduleRow
+  onOpen:      (clientId: string) => void
+  onToggle:    (row: ScheduleRow, next: boolean) => void
+  onBreakdown: (resId: string) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  // CompletedCard intentionally ignores outlined — completed items use solid pills
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(row.client_id)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(row.client_id) } }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ ...s.card, opacity: 0.85, boxShadow: hovered ? '0 4px 14px rgba(0,0,0,0.09)' : '0 0 3.5px rgba(0,0,0,0.08)', transition: 'all 0.15s ease' }}
+    >
+      <div style={s.cardTop}>
+        <div style={s.cardLeft}>
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={true}
+            aria-label="Mark not done"
+            onClick={e => { e.stopPropagation(); onToggle(row, false) }}
+            style={s.checkedBox}
+          >✓</button>
+          <ServicePill type={ACT_TO_PILL[row.activity_type]} />
+        </div>
+        <div style={s.cardRight}>
+          {row.reservation_id && (
+            <button type="button" onClick={e => { e.stopPropagation(); onBreakdown(row.reservation_id!) }} className="btn btn-icon" style={{ fontSize: 15, color: 'var(--text-secondary)' }} title="View fee breakdown" aria-label="View fee breakdown">ⓘ</button>
+          )}
+          <span style={s.ownerName}>{row.first_name} {row.last_name}</span>
+          {row.phone && <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
+        </div>
+      </div>
+      {row.dogs.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          {row.dogs.map((d, i) => (
+            <span key={i} style={{ fontSize: 12, fontWeight: 700, color: dogNameColor(d.gender) }}>{d.name}</span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -180,20 +312,16 @@ function HouseholdModal({ household, onClose, onUpdate }: {
   onClose:   () => void
   onUpdate:  (h: Household) => void
 }) {
-  // Escape to close + lock background scroll while open
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    const prevOverflow = document.body.style.overflow
+    const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prevOverflow
-    }
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
   }, [onClose])
 
   return (
-    <div style={s.overlay} onClick={onClose} role="dialog" aria-modal="true" aria-label={`${household.full_name} details`}>
+    <div style={s.overlay} onClick={onClose} role="dialog" aria-modal="true">
       <div style={s.dialog} onClick={e => e.stopPropagation()}>
         <HouseholdDetail household={household} embedded onBack={onClose} onUpdate={onUpdate} />
       </div>
@@ -206,12 +334,31 @@ export default function SchedulePage() {
   const router   = useRouter()
   const supabase = createClient()
 
-  const [date,    setDate]    = useState(todayStr())
-  const [rows,    setRows]    = useState<ScheduleRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState('')
-  const [selected,    setSelected]    = useState<Household | null>(null)
-  const [openingId,   setOpeningId]   = useState<string | null>(null)
+  const [date,      setDate]      = useState(todayStr())
+  const [rows,      setRows]      = useState<ScheduleRow[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState('')
+  const [selected,       setSelected]       = useState<Household | null>(null)
+  const [openingId,      setOpeningId]      = useState<string | null>(null)
+  const [breakdownResId, setBreakdownResId] = useState<string | null>(null)
+
+  // Section collapse state (desktop: all always open; mobile: Activity open, rest collapsed)
+  const [activityOpen,   setActivityOpen]   = useState(true)
+  const [inProgressOpen, setInProgressOpen] = useState(false)
+  const [completedOpen,  setCompletedOpen]  = useState(false)
+
+  // JS-driven mobile detection — avoids CSS specificity battles with inline styles.
+  // Initialised synchronously on the client so there's no flash on mobile.
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth <= 980
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 980px)')
+    setIsMobile(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
   const load = useCallback(async (d: string) => {
     setLoading(true)
@@ -230,29 +377,22 @@ export default function SchedulePage() {
       dogs: ((r.dogs as ScheduleDog[]) ?? []).map(dog => ({ ...dog, photoSigned: null })),
     })) as ScheduleRow[]
 
-    // Sign all dog photos in one batch
-    const paths = [...new Set(
-      raw.flatMap(r => r.dogs.map(dog => dog.photo_url).filter(Boolean) as string[])
-    )]
+    const paths = [...new Set(raw.flatMap(r => r.dogs.map(d => d.photo_url).filter(Boolean) as string[]))]
     const signed: Record<string, string> = {}
     if (paths.length > 0) {
       const { data: urls } = await supabase.storage.from('dog-photos').createSignedUrls(paths, 3600)
-      for (const u of urls ?? []) {
-        if (u.signedUrl && u.path) signed[u.path] = u.signedUrl
-      }
+      for (const u of urls ?? []) { if (u.signedUrl && u.path) signed[u.path] = u.signedUrl }
     }
 
     setRows(raw.map(r => ({
       ...r,
-      dogs: r.dogs.map(dog => ({ ...dog, photoSigned: dog.photo_url ? (signed[dog.photo_url] ?? null) : null })),
+      dogs: r.dogs.map(d => ({ ...d, photoSigned: d.photo_url ? (signed[d.photo_url] ?? null) : null })),
     })))
     setLoading(false)
   }, [router, supabase])
 
   useEffect(() => { load(date) }, [date, load])
 
-  // Build the full Household for the clicked client (reuses the same RPC as the
-  // staff dashboard, so the modal shows identical data) and open the modal.
   const openHousehold = useCallback(async (clientId: string) => {
     setOpeningId(clientId)
     const { data } = await supabase.rpc('get_staff_households')
@@ -266,29 +406,22 @@ export default function SchedulePage() {
     const signed: Record<string, string> = {}
     if (paths.length > 0) {
       const { data: urls } = await supabase.storage.from('dog-photos').createSignedUrls(paths, 3600)
-      for (const u of urls ?? []) {
-        if (u.signedUrl && u.path) signed[u.path] = u.signedUrl
-      }
+      for (const u of urls ?? []) { if (u.signedUrl && u.path) signed[u.path] = u.signedUrl }
     }
 
-    const household: Household = {
+    setSelected({
       ...(row as unknown as Household),
       reservation_id: (row.reservation_id as string | null) ?? null,
       dogs: dogs.map(d => ({ ...d, photoSigned: d.photo_url ? (signed[d.photo_url] ?? null) : null })),
-    }
-    setSelected(household)
+    })
     setOpeningId(null)
   }, [supabase])
 
-  // Toggle a schedule item complete/incomplete. Meet & Greet uses the dedicated
-  // RPCs so its completion correctly drives clients.meet_greet_status (and thus
-  // the client dashboard); other items use the generic completion table.
   const toggleComplete = useCallback(async (row: ScheduleRow, next: boolean) => {
     const matches = (r: ScheduleRow) =>
       row.activity_type === 'meet_greet'
         ? r.meet_greet_id === row.meet_greet_id
         : r.reservation_id === row.reservation_id && r.activity_type === row.activity_type
-    // Optimistic update
     setRows(prev => prev.map(r => matches(r) ? { ...r, completed: next } : r))
 
     let error
@@ -301,100 +434,149 @@ export default function SchedulePage() {
       }))
     }
     if (error) {
-      // Revert on failure
       setRows(prev => prev.map(r => matches(r) ? { ...r, completed: !next } : r))
       setError('Could not update — try again.')
     }
   }, [supabase, date])
 
-  function closeModal() {
-    setSelected(null)
-    // Reflect any edits made in the modal (dates, M&G, etc.) without losing the date
-    load(date)
-  }
+  function closeModal() { setSelected(null); load(date) }
 
-  // A completed boarding arrival = a stay that just started → it leaves
-  // "Activity on this date" and joins the In Progress group (green), not the
-  // grayed bottom of group 1.
+  // ── Compute sections ───────────────────────────────────────────
   const isStartedArrival = (r: ScheduleRow) => r.activity_type === 'arrival' && r.completed
 
-  // Within "Activity on this date", completed items sink to the bottom but stay
-  // visible (stable sort preserves the RPC's time ordering otherwise).
-  const group1 = rows.filter(r => r.group_num === 1 && !isStartedArrival(r))
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => (a.r.completed === b.r.completed) ? a.i - b.i : (a.r.completed ? 1 : -1))
-    .map(x => x.r)
-  // In Progress = just-started arrivals first, then ongoing stays with no activity.
-  const group2 = [...rows.filter(isStartedArrival), ...rows.filter(r => r.group_num === 2)]
+  // Today's Activity: uncompleted group1 events (arrivals, departures, daycare, M&G)
+  const todayActivity = rows.filter(r => r.group_num === 1 && !r.completed)
+
+  // In Progress: just-started boarding arrivals + ongoing overnight stays
+  const inProgress = [...rows.filter(isStartedArrival), ...rows.filter(r => r.group_num === 2)]
+
+  // Completed: completed group1 events (started arrivals move to In Progress, not here)
+  const completedItems = rows.filter(r => r.group_num === 1 && r.completed && !isStartedArrival(r))
 
   return (
     <div style={s.page}>
       <SiteNav />
 
       <main style={s.main}>
-        <h2 style={s.pageHeading}>Daily Schedule</h2>
-        {/* ── Rover booking — opens the Rover page with the booking form ready ── */}
-        <div style={{ textAlign: 'center', marginBottom: 14 }}>
-          <button type="button" onClick={() => router.push('/staff/rover?new=1')} style={s.roverBtn}>+ Add Rover Booking</button>
+        {/* ── Header ── */}
+        <div className="staff-header-3col">
+          <div className="page-header-text">
+            <h2 style={s.pageTitle}>Daily Schedule</h2>
+            <p style={s.subtitle}>Here&apos;s what&apos;s happening today.</p>
+          </div>
+          <DateNavigator
+            date={date}
+            todayStr={todayStr()}
+            onChange={setDate}
+            onPrev={() => setDate(d => shiftDate(d, -1))}
+            onNext={() => setDate(d => shiftDate(d, 1))}
+          />
+          <div className="page-header-cta">
+            <button type="button" onClick={() => router.push('/staff/rover?new=1')} className="btn btn-rover btn-sm">+ Add Rover Booking</button>
+          </div>
         </div>
-        {/* ── Date picker ── */}
-        <div style={s.dateBar}>
-          <button type="button" onClick={() => setDate(d => shiftDate(d, -1))} style={s.navBtn} aria-label="Previous day">‹</button>
-          <div style={s.dateCenter}>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} style={s.dateInput} />
-            <p style={s.dateLong}>{fmtDateLong(date)}</p>
+
+        {/* ── Two-column body ── */}
+        <div className="sched-body">
+
+          {/* Left: availability calendar */}
+          <aside style={s.availPanel}>
+            <h3 style={s.availTitle}>Manage Availability</h3>
+            <p style={s.availHint}>Block dates you&apos;re unavailable.</p>
+            <BlockedDatesCalendar stacked />
+          </aside>
+
+          {/* Right: three sections */}
+          <div style={s.sectionsCol}>
+            {loading ? (
+              <p style={s.muted}>Loading…</p>
+            ) : error ? (
+              <p style={{ ...s.muted, color: 'var(--error)' }}>{error}</p>
+            ) : (
+              <>
+                <ScheduleSection
+                  title="Today's Activity"
+                  count={todayActivity.length}
+                  open={activityOpen}
+                  onToggle={() => setActivityOpen(o => !o)}
+                  isMobile={isMobile}
+                >
+                  {todayActivity.length === 0
+                    ? <p style={s.empty}>No arrivals, departures, daycare, or Meet &amp; Greets today.</p>
+                    : todayActivity.map((r, i) => (
+                        <ActivityCard
+                          key={`${r.activity_type}-${r.reservation_id ?? r.meet_greet_id}-${i}`}
+                          row={r}
+                          onOpen={openHousehold}
+                          onToggle={toggleComplete}
+                          onBreakdown={setBreakdownResId}
+                        />
+                      ))
+                  }
+                </ScheduleSection>
+
+                <ScheduleSection
+                  title="In Progress"
+                  count={inProgress.length}
+                  open={inProgressOpen}
+                  onToggle={() => setInProgressOpen(o => !o)}
+                  isMobile={isMobile}
+                >
+                  {inProgress.length === 0
+                    ? <p style={s.empty}>No dogs currently staying overnight.</p>
+                    : <div style={s.grid2}>
+                        {inProgress.map((r, i) => (
+                          <InProgressCard
+                            key={`ip-${r.activity_type}-${r.reservation_id}-${i}`}
+                            row={r}
+                            date={date}
+                            onOpen={openHousehold}
+                            onToggle={toggleComplete}
+                            onBreakdown={setBreakdownResId}
+                          />
+                        ))}
+                      </div>
+                  }
+                </ScheduleSection>
+
+                <ScheduleSection
+                  title="Completed"
+                  count={completedItems.length}
+                  open={completedOpen}
+                  onToggle={() => setCompletedOpen(o => !o)}
+                  isMobile={isMobile}
+                >
+                  {completedItems.length === 0
+                    ? <p style={s.empty}>Nothing completed yet.</p>
+                    : <div style={s.grid2}>
+                        {completedItems.map((r, i) => (
+                          <CompletedCard
+                            key={`done-${r.activity_type}-${r.reservation_id ?? r.meet_greet_id}-${i}`}
+                            row={r}
+                            onOpen={openHousehold}
+                            onToggle={toggleComplete}
+                            onBreakdown={setBreakdownResId}
+                          />
+                        ))}
+                      </div>
+                  }
+                </ScheduleSection>
+              </>
+            )}
           </div>
-          <button type="button" onClick={() => setDate(d => shiftDate(d, 1))} style={s.navBtn} aria-label="Next day">›</button>
+
         </div>
-        {date !== todayStr() && (
-          <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <button type="button" onClick={() => setDate(todayStr())} style={s.todayBtn}>Jump to Today</button>
-          </div>
-        )}
-
-        {loading ? (
-          <p style={s.muted}>Loading…</p>
-        ) : error ? (
-          <p style={{ ...s.muted, color: '#ef4444' }}>{error}</p>
-        ) : rows.length === 0 ? (
-          <div style={s.empty}>
-            <span style={{ fontSize: 36 }}>📭</span>
-            <p style={{ margin: '12px 0 0', color: '#6b7280' }}>Nothing scheduled for this day.</p>
-          </div>
-        ) : (
-          <>
-            {/* ── Group 1: activity on this date ── */}
-            <section style={s.section}>
-              <h2 style={s.groupTitle}>Activity on this date</h2>
-              {group1.length === 0
-                ? <p style={s.muted}>No arrivals, departures, daycare, or Meet &amp; Greets today.</p>
-                : group1.map((r, i) => <ActivityRow key={`${r.activity_type}-${r.reservation_id ?? r.meet_greet_id}-${i}`} row={r} onOpen={openHousehold} onToggle={toggleComplete} />)
-              }
-            </section>
-
-            {/* ── Hairline separator ── */}
-            <div style={s.hairline} />
-
-            {/* ── Group 2: in progress, no activity ── */}
-            <section style={s.section}>
-              <h2 style={{ ...s.groupTitle, color: '#9ca3af' }}>In progress · staying overnight</h2>
-              {group2.length === 0
-                ? <p style={s.muted}>No dogs currently staying overnight.</p>
-                : group2.map((r, i) => <ActivityRow key={`ip-${r.activity_type}-${r.reservation_id}-${i}`} row={r} onOpen={openHousehold} onToggle={toggleComplete} />)
-              }
-            </section>
-          </>
-        )}
       </main>
 
       {openingId && !selected && (
-        <div style={s.overlay}><div style={s.openingToast}>Loading household…</div></div>
+        <div style={s.overlay}><div style={s.openingToast}>Loading…</div></div>
       )}
-
       {selected && (
         <HouseholdModal household={selected} onClose={closeModal} onUpdate={setSelected} />
       )}
-
+      {breakdownResId && (
+        <FeeBreakdownModal reservationId={breakdownResId} onClose={() => setBreakdownResId(null)} />
+      )}
     </div>
   )
 }
@@ -402,43 +584,49 @@ export default function SchedulePage() {
 // ── Styles ─────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
   page:        { minHeight: '100vh', background: 'var(--page-bg)' },
-  main:        { maxWidth: 760, margin: '0 auto', padding: '28px 24px 60px' },
-  pageHeading: { margin: '0 0 20px', fontSize: 22, fontWeight: 800, color: '#111827', textAlign: 'center' },
+  main:        { maxWidth: 1200, margin: '0 auto', padding: '28px 24px 60px' },
 
-  dateBar:     { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 8 },
-  navBtn:      { fontSize: 22, lineHeight: 1, width: 38, height: 38, borderRadius: '50%', border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', fontFamily: 'inherit' },
-  dateCenter:  { textAlign: 'center' },
-  dateInput:   { fontSize: 14, padding: '7px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', cursor: 'pointer' },
-  dateLong:    { margin: '6px 0 0', fontSize: 14, fontWeight: 700, color: '#111827' },
-  todayBtn:    { fontSize: 12, fontWeight: 600, color: '#2563eb', background: '#fff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '5px 14px', cursor: 'pointer', fontFamily: 'inherit' },
-  roverBtn:    { fontSize: 13, fontWeight: 700, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 999, padding: '8px 18px', cursor: 'pointer', fontFamily: 'inherit' },
+  // Header
+  pageTitle:   { margin: '0 0 4px', fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' },
+  subtitle:    { margin: 0, fontSize: 14, color: 'var(--text-secondary)' },
+  // Availability panel (left column)
+  availPanel:  { background: 'var(--surface)', borderRadius: 'var(--radius-card)', padding: '20px', boxShadow: '0 0 3.5px rgba(0,0,0,0.10)' },
+  availTitle:  { margin: '0 0 4px', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
+  availHint:   { margin: '0 0 16px', fontSize: 13, color: 'var(--text-secondary)' },
 
-  section:     { display: 'flex', flexDirection: 'column', gap: 12 },
-  groupTitle:  { margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' },
-  hairline:    { height: 1, background: '#e5e7eb', margin: '28px 0' },
+  // Sections column (right column)
+  sectionsCol: { display: 'flex', flexDirection: 'column', gap: 16 },
 
-  row:         { background: '#fff', borderRadius: 12, border: '1px solid #f3f4f6', borderLeft: '4px solid', padding: '14px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
-  rowTop:      { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10, flexWrap: 'wrap' },
-  rowLeft:     { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  activityBadge:{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1.5px solid', background: 'transparent', whiteSpace: 'nowrap' },
-  time:        { fontSize: 14, fontWeight: 700, color: '#111827' },
-  spanDates:   { fontSize: 12, color: '#9ca3af' },
-  rowClient:   { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0 },
-  clientName:  { fontSize: 14, fontWeight: 700, color: '#111827' },
-  phone:       { fontSize: 12, color: '#2563eb', textDecoration: 'none' },
+  // Section container
+  section:     { background: 'rgba(255,255,255,0.55)', borderRadius: 'var(--radius-card)', padding: '20px' },
+  sectionHead: { display: 'flex', alignItems: 'center', marginBottom: 14, cursor: 'pointer', userSelect: 'none', gap: 8 },
+  sectionTitle:{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
+  countBadge:  { minWidth: 20, height: 20, borderRadius: 999, background: 'var(--primary-light)', color: 'var(--primary-dark)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, padding: '0 6px' },
 
-  check:       { width: 22, height: 22, borderRadius: '50%', border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1 },
-  carePreview: { margin: '0 0 8px', fontSize: 12, color: '#6b7280', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
-  longStayBadge: { fontSize: 11, fontWeight: 700, color: '#fff', background: '#7c3aed', borderRadius: 20, padding: '3px 9px', whiteSpace: 'nowrap' },
+  // Cards
+  card:        { background: 'var(--surface)', borderRadius: 'var(--radius-card)', padding: '14px 16px', cursor: 'pointer' },
+  cardTop:     { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' },
+  cardLeft:    { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  cardRight:   { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, minWidth: 0 },
+  ownerName:   { fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' },
+  phone:       { fontSize: 12, color: 'var(--primary)', textDecoration: 'none' },
+  time:        { fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' },
 
-  dogRow:      { display: 'flex', flexWrap: 'wrap', gap: 12 },
-  noDogs:      { fontSize: 13, color: '#9ca3af' },
+  // Checkbox states
+  checkbox:    { width: 22, height: 22, borderRadius: '50%', border: '2px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1 },
+  checkedBox:  { width: 22, height: 22, borderRadius: '50%', background: 'var(--success)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, flexShrink: 0, border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1 },
 
-  muted:       { fontSize: 14, color: '#9ca3af', margin: 0 },
-  empty:       { textAlign: 'center', padding: '60px 24px' },
+  // Pills
+  longStayPill:{ display: 'inline-flex', alignItems: 'center', height: 22, background: 'var(--status-long-stay)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '0 10px', borderRadius: 999, whiteSpace: 'nowrap', boxSizing: 'border-box', lineHeight: 1 },
+
+  // In Progress / Completed grids
+  grid2:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 },
+
+  empty:       { margin: 0, fontSize: 14, color: 'var(--text-secondary)', fontStyle: 'italic' },
+  muted:       { fontSize: 14, color: 'var(--text-secondary)', margin: 0 },
 
   // Modal
   overlay:     { position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.55)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 50, overflowY: 'auto' },
-  dialog:      { background: 'var(--page-bg)', borderRadius: 14, maxWidth: 900, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
+  dialog:      { background: 'var(--page-bg)', borderRadius: 'var(--radius-card)', maxWidth: 900, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
   openingToast:{ alignSelf: 'center', margin: 'auto', background: '#fff', borderRadius: 10, padding: '14px 22px', fontSize: 14, color: '#374151', boxShadow: '0 8px 30px rgba(0,0,0,0.2)' },
 }

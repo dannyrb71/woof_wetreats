@@ -1,24 +1,27 @@
 'use client'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { SiteNav } from '@/components/SiteNav'
 import DatePicker from '@/components/booking/DatePicker'
 import TimePicker from '@/components/booking/TimePicker'
 import { DogPhotoUploader } from '@/components/dogs/DogPhotoUploader'
+import { dogNameColor } from '@/lib/dog-colors'
+import { getHolidayDateRange } from '@/lib/pricing-engine'
+import { ServicePill } from '@/components/shared/molecules/ServicePill'
+import { AddDogButton } from '@/components/shared/molecules/AddDogButton'
 
 // ── Rover: the one permanent no-login client. Every dog that comes through Rover
 // is its own dogs row attached here; bookings carry NO price/payment (total_price
 // is always $0 and hidden). This page is both the dog overview and the booking UI.
 
-const SVC = { boarding: '#0058A0', daycare: '#C5A92B' }
+const SVC = { boarding: 'var(--status-boarding)', daycare: 'var(--status-daycare)' }
 type ServiceType = 'boarding' | 'daycare'
 
 interface RoverDog { id: string; name: string; gender: string | null; birthdate: string; photo_url: string | null; photoSigned: string | null }
 interface RoverRes { id: string; service_type: string; status: string; dropoff_date: string; dropoff_time: string; pickup_date: string; pickup_time: string; dogs: string[]; dog_ids: string[] }
 interface RoverMG  { id: string; scheduled_date: string; scheduled_time: string; status: string; dog_id: string | null }
 
-function dogNameColor(g: string | null) { return g === 'male' ? '#2140AF' : g === 'female' ? '#AE08A1' : '#111827' }
 function fmtDate(ymd: string) { const [y,m,d] = ymd.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString('en-US',{ month:'short', day:'numeric', year:'numeric' }) }
 function fmtTime(t: string) { if (!t) return ''; const [h,m] = t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` }
 
@@ -102,18 +105,65 @@ export default function RoverPage() {
   if (loading) return <div style={s.center}><p style={{ color: '#6b7280' }}>Loading…</p></div>
   if (error)   return <div style={s.center}><p style={{ color: '#ef4444' }}>{error}</p></div>
 
+  // Sort by date (boarding = drop-off date; daycare = its single date = drop-off).
+  // Active (in-progress + upcoming) soonest-first; completed drop to a Past section,
+  // most-recent first — consistent with how the rest of the app shows past activity.
+  const activeRes = reservations.filter(r => r.status !== 'completed')
+    .sort((a, b) => a.dropoff_date.localeCompare(b.dropoff_date))
+  const pastRes = reservations.filter(r => r.status === 'completed')
+    .sort((a, b) => b.dropoff_date.localeCompare(a.dropoff_date))
+
+  const renderBooking = (r: RoverRes) => (
+    editingId === r.id ? (
+      <RoverBookingForm key={r.id} roverId={roverId} dogs={dogs} existing={r}
+        onClose={() => setEditingId(null)}
+        onCreated={() => { setEditingId(null); load() }} />
+    ) : (
+      <div key={r.id} style={{ ...s.resCard, borderLeftColor: r.status === 'completed' ? '#9ca3af' : (SVC[r.service_type as ServiceType] ?? '#9ca3af'), opacity: r.status === 'completed' ? 0.7 : 1 }}>
+        <div style={s.resTop}>
+          <ServicePill type={r.service_type as ServiceType} />
+          <span style={s.resStatus}>{r.status.replace('_', ' ')}</span>
+        </div>
+        <p style={s.resDogs}>{r.dogs.join(', ') || '—'}</p>
+        <p style={s.resDates}>
+          {r.service_type === 'boarding'
+            ? <>{fmtDate(r.dropoff_date)} · {fmtTime(r.dropoff_time)} → {fmtDate(r.pickup_date)} · {fmtTime(r.pickup_time)}</>
+            : <>{fmtDate(r.dropoff_date)} · ⬇ {fmtTime(r.dropoff_time)} ⬆ {fmtTime(r.pickup_time)}</>}
+        </p>
+        <div style={s.resActions}>
+          {delConfirm === r.id ? (
+            <>
+              <span style={{ fontSize: 12, color: '#374151', fontWeight: 600 }}>Delete this booking?</span>
+              <button type="button" onClick={() => deleteBooking(r.id)} disabled={delBusy} className="btn btn-destructive btn-xs">{delBusy ? '…' : 'Yes, delete'}</button>
+              <button type="button" onClick={() => setDelConfirm(null)} className="btn btn-ghost btn-xs">Keep</button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={() => { setEditingId(r.id); setShowBooking(false) }} className="btn btn-outlined btn-xs">Edit</button>
+              <button type="button" onClick={() => setDelConfirm(r.id)} className="btn btn-destructive-outlined btn-xs">Delete</button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  )
+
   return (
     <div style={s.page}>
       <SiteNav />
       <main style={s.main}>
-        <div style={s.header}>
-          <div style={s.avatar}>R</div>
-          <div>
-            <h2 style={s.title}>Rover</h2>
-            <p style={s.subtitle}>Rover bookings — no login, no fees. {dogs.length} dog{dogs.length !== 1 ? 's' : ''} on file.</p>
+        <div className="staff-header-2col" style={s.header}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={s.avatar}>R</div>
+            <div className="page-header-text">
+              <h2 style={s.title}>Rover</h2>
+              <p style={s.subtitle}>Rover bookings — no login, no fees. {dogs.length} dog{dogs.length !== 1 ? 's' : ''} on file.</p>
+            </div>
           </div>
           {!showBooking && (
-            <button type="button" onClick={() => setShowBooking(true)} style={s.addBookingBtn}>+ Add Rover Booking</button>
+            <div className="page-header-cta">
+              <button type="button" onClick={() => setShowBooking(true)} className="btn btn-rover btn-sm">+ Add Rover Booking</button>
+            </div>
           )}
         </div>
 
@@ -125,54 +175,27 @@ export default function RoverPage() {
           />
         )}
 
-        {/* ── Bookings ── */}
+        {/* ── Bookings (active, soonest-first) ── */}
         <section style={s.section}>
           <h3 style={s.sectionTitle}>Bookings</h3>
-          {reservations.length === 0
-            ? <p style={s.muted}>No Rover bookings yet.</p>
-            : reservations.map(r => (
-                editingId === r.id ? (
-                  <RoverBookingForm key={r.id} roverId={roverId} dogs={dogs} existing={r}
-                    onClose={() => setEditingId(null)}
-                    onCreated={() => { setEditingId(null); load() }} />
-                ) : (
-                  <div key={r.id} style={{ ...s.resCard, borderLeftColor: SVC[r.service_type as ServiceType] ?? '#9ca3af' }}>
-                    <div style={s.resTop}>
-                      <span style={{ ...s.svcBadge, color: SVC[r.service_type as ServiceType], borderColor: SVC[r.service_type as ServiceType] }}>
-                        {r.service_type === 'boarding' ? '🏠 Boarding' : '🌞 Daycare'}
-                      </span>
-                      <span style={s.resStatus}>{r.status.replace('_', ' ')}</span>
-                    </div>
-                    <p style={s.resDogs}>{r.dogs.join(', ') || '—'}</p>
-                    <p style={s.resDates}>
-                      {r.service_type === 'boarding'
-                        ? <>{fmtDate(r.dropoff_date)} · {fmtTime(r.dropoff_time)} → {fmtDate(r.pickup_date)} · {fmtTime(r.pickup_time)}</>
-                        : <>{fmtDate(r.dropoff_date)} · ⬇ {fmtTime(r.dropoff_time)} ⬆ {fmtTime(r.pickup_time)}</>}
-                    </p>
-                    <div style={s.resActions}>
-                      {delConfirm === r.id ? (
-                        <>
-                          <span style={{ fontSize: 12, color: '#374151', fontWeight: 600 }}>Delete this booking?</span>
-                          <button type="button" onClick={() => deleteBooking(r.id)} disabled={delBusy} style={s.tinyDanger}>{delBusy ? '…' : 'Yes, delete'}</button>
-                          <button type="button" onClick={() => setDelConfirm(null)} style={s.tinyBtn}>Keep</button>
-                        </>
-                      ) : (
-                        <>
-                          <button type="button" onClick={() => { setEditingId(r.id); setShowBooking(false) }} style={s.tinyBtn}>Edit</button>
-                          <button type="button" onClick={() => setDelConfirm(r.id)} style={s.tinyDangerOutline}>Delete</button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )
-              ))}
+          {activeRes.length === 0
+            ? <p style={s.muted}>No upcoming Rover bookings.</p>
+            : activeRes.map(renderBooking)}
         </section>
+
+        {/* ── Past bookings (completed, most-recent first) ── */}
+        {pastRes.length > 0 && (
+          <section style={s.section}>
+            <h3 style={{ ...s.sectionTitle, color: 'var(--text-secondary)' }}>Past Bookings</h3>
+            {pastRes.map(renderBooking)}
+          </section>
+        )}
 
         {/* ── Dogs ── */}
         <section style={s.section}>
           <div style={s.sectionHead}>
             <h3 style={s.sectionTitle}>Rover Dogs</h3>
-            {!addingDog && <button type="button" onClick={() => setAddingDog(true)} style={s.smallBtn}>+ Add Dog</button>}
+            {!addingDog && <AddDogButton onClick={() => setAddingDog(true)} />}
           </div>
           {addingDog && (
             <AddRoverDog roverId={roverId} onClose={() => setAddingDog(false)} onAdded={() => { setAddingDog(false); load() }} />
@@ -211,6 +234,12 @@ function RoverBookingForm({ roverId, dogs, existing, onClose, onCreated }: {
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState('')
   const noBlocked = new Set<string>()
+  // Holidays for the calendars — span last year → 2 years out so past + future
+  // Rover bookings both show the holiday treatment (Rover allows past dates).
+  const holidayDates = useMemo(() => {
+    const y = new Date().getFullYear()
+    return getHolidayDateRange(`${y - 1}-01-01`, `${y + 2}-12-31`)
+  }, [])
 
   async function submit() {
     setErr('')
@@ -254,8 +283,8 @@ function RoverBookingForm({ roverId, dogs, existing, onClose, onCreated }: {
   return (
     <div style={s.form}>
       <div style={s.formHead}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{existing ? 'Edit Rover Booking' : 'New Rover Booking'}</h3>
-        <button type="button" onClick={onClose} style={s.smallBtn}>Close</button>
+        <h3 className="section-label">{existing ? 'Edit Rover Booking' : 'New Rover Booking'}</h3>
+        <button type="button" onClick={onClose} className="btn btn-ghost btn-sm">Close</button>
       </div>
       <div style={s.fieldRow}>
         {(['boarding', 'daycare'] as const).map(sv => (
@@ -281,9 +310,9 @@ function RoverBookingForm({ roverId, dogs, existing, onClose, onCreated }: {
       </div>
 
       <div style={s.pickerRow}>
-        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={noBlocked} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
+        <DatePicker label="Drop-off date" value={dropDate} onChange={setDropDate} blockedDates={noBlocked} holidayDates={holidayDates} rangeEnd={service === 'boarding' ? pickDate : null} allowPast />
         {service === 'boarding' && (
-          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={noBlocked} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
+          <DatePicker label="Pick-up date" value={pickDate} onChange={setPickDate} blockedDates={noBlocked} holidayDates={holidayDates} rangeStart={dropDate} minDate={dropDate ?? undefined} allowPast />
         )}
       </div>
       <div style={s.fieldRow}>
@@ -292,8 +321,7 @@ function RoverBookingForm({ roverId, dogs, existing, onClose, onCreated }: {
       </div>
 
       {err && <p style={{ margin: 0, fontSize: 13, color: '#ef4444' }}>{err}</p>}
-      <button type="button" onClick={submit} disabled={submitting}
-        style={{ ...s.submit, opacity: submitting ? 0.5 : 1, cursor: submitting ? 'not-allowed' : 'pointer' }}>
+      <button type="button" onClick={submit} disabled={submitting} className="btn btn-rover">
         {submitting ? 'Saving…' : existing ? 'Save Changes' : 'Create Booking'}
       </button>
     </div>
@@ -343,8 +371,8 @@ function AddRoverDog({ roverId, onClose, onAdded }: { roverId: string; onClose: 
       </label>
       {err && <p style={{ margin: 0, fontSize: 13, color: '#ef4444' }}>{err}</p>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button type="button" onClick={save} disabled={saving} style={{ ...s.submit, opacity: saving ? 0.5 : 1 }}>{saving ? 'Adding…' : 'Add Dog'}</button>
-        <button type="button" onClick={onClose} style={s.smallBtn}>Cancel</button>
+        <button type="button" onClick={save} disabled={saving} className="btn btn-rover">{saving ? 'Adding…' : 'Add Dog'}</button>
+        <button type="button" onClick={onClose} className="btn btn-ghost btn-sm">Cancel</button>
       </div>
     </div>
   )
@@ -398,7 +426,7 @@ function RoverDogCard({ dog, roverId, meetGreets, onChanged }: {
       {dog.gender === null && (
         <div style={{ display: 'flex', gap: 6 }}>
           {(['male', 'female'] as const).map(g => (
-            <button key={g} type="button" onClick={() => setGender(g)} style={s.tinyBtn}>{g === 'male' ? '♂ Male' : '♀ Female'}</button>
+            <button key={g} type="button" onClick={() => setGender(g)} className="btn btn-ghost btn-xs">{g === 'male' ? '♂ Male' : '♀ Female'}</button>
           ))}
         </div>
       )}
@@ -415,20 +443,20 @@ function RoverDogCard({ dog, roverId, meetGreets, onChanged }: {
           <input type="date" value={mgDate} onChange={e => setMgDate(e.target.value)} style={s.input} />
           <TimePicker label="Time" value={mgTime} onChange={setMgTime} />
           <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" onClick={scheduleMG} disabled={busy} style={s.tinyPrimary}>{busy ? '…' : 'Schedule'}</button>
-            <button type="button" onClick={() => setSchedOpen(false)} style={s.tinyBtn}>Cancel</button>
+            <button type="button" onClick={scheduleMG} disabled={busy} className="btn btn-rover btn-xs">{busy ? '…' : 'Schedule'}</button>
+            <button type="button" onClick={() => setSchedOpen(false)} className="btn btn-ghost btn-xs">Cancel</button>
           </div>
         </div>
       ) : (
         <div style={s.dogActions}>
-          <button type="button" onClick={() => { setSchedOpen(true); setErr('') }} style={s.tinyBtn}>+ Meet &amp; Greet</button>
+          <button type="button" onClick={() => { setSchedOpen(true); setErr('') }} className="btn btn-ghost btn-xs">+ Meet &amp; Greet</button>
           {confirming ? (
             <>
-              <button type="button" onClick={remove} disabled={busy} style={s.tinyDanger}>{busy ? '…' : 'Delete'}</button>
-              <button type="button" onClick={() => setConfirming(false)} style={s.tinyBtn}>Keep</button>
+              <button type="button" onClick={remove} disabled={busy} className="btn btn-destructive btn-xs">{busy ? '…' : 'Delete'}</button>
+              <button type="button" onClick={() => setConfirming(false)} className="btn btn-ghost btn-xs">Keep</button>
             </>
           ) : (
-            <button type="button" onClick={() => { setConfirming(true); setErr('') }} style={s.tinyDangerOutline}>Delete</button>
+            <button type="button" onClick={() => { setConfirming(true); setErr('') }} className="btn btn-destructive-outlined btn-xs">Delete</button>
           )}
         </div>
       )}
@@ -441,16 +469,15 @@ const s: Record<string, React.CSSProperties> = {
   page:        { minHeight: '100vh', background: 'var(--page-bg)' },
   center:      { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
   main:        { maxWidth: 920, margin: '0 auto', padding: '28px 24px 60px' },
-  header:      { display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24, flexWrap: 'wrap' },
+  header:      { marginBottom: 24 },
   avatar:      { width: 52, height: 52, borderRadius: '50%', background: '#16a34a', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 800, flexShrink: 0 },
   title:       { margin: 0, fontSize: 22, fontWeight: 800, color: '#111827' },
   subtitle:    { margin: '2px 0 0', fontSize: 13, color: '#6b7280' },
-  addBookingBtn:{ marginLeft: 'auto', fontSize: 14, fontWeight: 700, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 999, padding: '10px 18px', cursor: 'pointer', fontFamily: 'inherit' },
   section:     { marginBottom: 32 },
   sectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle:{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  sectionTitle:{ margin: '0 0 12px', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
   muted:       { fontSize: 13, color: '#9ca3af', margin: 0 },
-  resCard:     { background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', borderLeft: '4px solid', padding: '14px 16px', marginBottom: 10 },
+  resCard:     { background: '#fff', borderRadius: 'var(--radius-card)', border: '1px solid #e5e7eb', borderLeft: '4px solid', padding: '14px 16px', marginBottom: 10 },
   resTop:      { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 },
   svcBadge:    { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1.5px solid', background: 'transparent' },
   resStatus:   { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: '#f3f4f6', color: '#374151', textTransform: 'capitalize' },
@@ -458,7 +485,7 @@ const s: Record<string, React.CSSProperties> = {
   resDates:    { margin: 0, fontSize: 13, color: '#374151' },
   resActions:  { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: '1px solid #f3f4f6' },
   dogGrid:     { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 },
-  dogCard:     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  dogCard:     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
   dogTop:      { display: 'flex', alignItems: 'center', gap: 12 },
   dogPhoto:    { width: 44, height: 44, borderRadius: '50%', objectFit: 'cover' as const, border: '2px solid #e5e7eb', flexShrink: 0 },
   dogFallback: { width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 },
@@ -466,7 +493,7 @@ const s: Record<string, React.CSSProperties> = {
   dogActions:  { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
   mgNote:      { margin: 0, fontSize: 12, color: '#9a3412', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '4px 8px' },
   schedBox:    { display: 'flex', flexDirection: 'column', gap: 8, background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 },
-  form:        { background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 },
+  form:        { background: '#fafafa', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '16px 18px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 },
   formHead:    { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   fieldRow:    { display: 'flex', gap: 10, flexWrap: 'wrap' },
   pickerRow:   { display: 'flex', gap: 16, flexWrap: 'wrap' },
@@ -474,10 +501,4 @@ const s: Record<string, React.CSSProperties> = {
   toggleBtn:   { fontSize: 14, fontWeight: 600, padding: '8px 16px', borderRadius: 8, border: '1.5px solid', cursor: 'pointer', fontFamily: 'inherit' },
   dogChip:     { fontSize: 13, fontWeight: 600, padding: '6px 14px', borderRadius: 20, border: '1.5px solid', cursor: 'pointer', fontFamily: 'inherit' },
   input:       { fontSize: 14, padding: '9px 11px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', marginTop: 2 },
-  submit:      { fontSize: 15, fontWeight: 700, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 10, padding: '10px 18px', fontFamily: 'inherit', cursor: 'pointer' },
-  smallBtn:    { fontSize: 12, fontWeight: 600, color: '#374151', background: '#f3f4f6', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontFamily: 'inherit' },
-  tinyBtn:     { fontSize: 12, fontWeight: 600, color: '#374151', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' },
-  tinyPrimary: { fontSize: 12, fontWeight: 700, color: '#fff', background: '#16a34a', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontFamily: 'inherit' },
-  tinyDanger:  { fontSize: 12, fontWeight: 600, color: '#fff', background: '#be123c', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' },
-  tinyDangerOutline: { fontSize: 12, fontWeight: 600, color: '#be123c', background: '#fff', border: '1px solid #fecdd3', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' },
 }

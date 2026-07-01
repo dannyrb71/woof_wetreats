@@ -80,7 +80,7 @@ export function DogPhotoUploader({ dogId, authUid, currentPath, onDone, pathPref
       />
 
       {state === 'idle' || state === 'error' ? (
-        <button type="button" onClick={() => inputRef.current?.click()} style={s.btn}>
+        <button type="button" onClick={() => inputRef.current?.click()} className="btn btn-outlined btn-xs">
           {currentPath ? '📷 Change photo' : '📷 Add photo'}
         </button>
       ) : (
@@ -96,7 +96,6 @@ export function DogPhotoUploader({ dogId, authUid, currentPath, onDone, pathPref
 
 const s: Record<string, React.CSSProperties> = {
   wrap:       { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 },
-  btn:        { fontSize: 12, color: '#2563eb', background: 'none', border: '1px solid #bfdbfe', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' },
   statusText: { fontSize: 12, color: '#6b7280', fontStyle: 'italic' },
   err:        { margin: 0, fontSize: 12, color: '#ef4444' },
 }

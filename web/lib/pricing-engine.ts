@@ -207,6 +207,12 @@ function buildHolidaySet(dropoff: string, pickup: string): Set<string> {
   return all
 }
 
+// Exported for calendar highlighting — returns every holiday date in the given
+// year range (inclusive). Safe to call client-side; no I/O.
+export function getHolidayDateRange(fromYmd: string, toYmd: string): Set<string> {
+  return buildHolidaySet(fromYmd, toYmd)
+}
+
 // =============================================================
 // Main pricing function
 // =============================================================

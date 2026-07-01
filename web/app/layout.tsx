@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Woof Wetreats',
-  description: 'Dog boarding and daycare reservations',
+  description: 'Dog boarding and daycare bookings',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

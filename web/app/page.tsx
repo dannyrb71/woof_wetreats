@@ -126,7 +126,7 @@ const s: Record<string, React.CSSProperties> = {
   ctaSecondary:   { fontSize: 16, fontWeight: 600, color: '#2563eb', background: '#fff', border: '1.5px solid #bfdbfe', padding: '12px 28px', borderRadius: 10, textDecoration: 'none' },
   rulesLink:      { display: 'inline-block', fontSize: 15, fontWeight: 600, color: '#b45309', textDecoration: 'none' },
   highlights:     { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginTop: 44 },
-  card:           { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: '22px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  card:           { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '22px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
   cardIcon:       { fontSize: 28 },
   cardTitle:      { margin: '10px 0 6px', fontSize: 17, fontWeight: 700, color: '#111827' },
   cardText:       { margin: 0, fontSize: 14, lineHeight: 1.6, color: '#6b7280' },

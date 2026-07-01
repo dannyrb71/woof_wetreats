@@ -97,7 +97,7 @@ export function PricingEditor() {
     const normalized = {} as Draft
     for (const k of ALL_KEYS) normalized[k] = fmt(payload[k])
     setDraft(normalized); setSaved(normalized)
-    setNotice('Pricing saved. New rates apply to future bookings only — existing reservations are unchanged.')
+    setNotice('Pricing saved. New rates apply to future bookings only — existing bookings are unchanged.')
   }
 
   if (loading) return <p style={s.muted}>Loading…</p>
@@ -108,7 +108,7 @@ export function PricingEditor() {
       <p style={s.hint}>
         Edit the cash rates below. Venmo prices are computed automatically as cash + the Venmo
         surcharge — they&apos;re never set independently. Saving affects <strong>future bookings only</strong>;
-        existing reservations keep the price calculated when they were created.
+        existing bookings keep the price calculated when they were created.
       </p>
 
       {/* ── Cash rates with live Venmo preview ── */}
@@ -161,7 +161,7 @@ export function PricingEditor() {
           <input type="number" step="0.5" inputMode="decimal" placeholder="+5"
             value={bulk} onChange={e => setBulk(e.target.value)} style={s.bulkInput} />
           <button type="button" onClick={applyBulk} disabled={!bulkValid}
-            style={{ ...s.bulkBtn, opacity: bulkValid ? 1 : 0.5, cursor: bulkValid ? 'pointer' : 'not-allowed' }}>
+            className="btn btn-outlined btn-sm">
             Apply to all cash rates
           </button>
         </div>
@@ -183,7 +183,7 @@ export function PricingEditor() {
       {notice && <p style={{ margin: '14px 0 0', fontSize: 13, color: '#15803d' }}>{notice}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
         <button type="button" onClick={save} disabled={!dirty || saving}
-          style={{ ...s.saveBtn, opacity: (!dirty || saving) ? 0.5 : 1, cursor: (!dirty || saving) ? 'not-allowed' : 'pointer' }}>
+          className="btn btn-primary btn-sm">
           {saving ? 'Saving…' : 'Save changes'}
         </button>
         {dirty && !saving && <span style={{ fontSize: 13, color: '#b45309' }}>Unsaved changes</span>}
@@ -202,13 +202,11 @@ const s: Record<string, React.CSSProperties> = {
   dollar:      { fontSize: 15, color: '#6b7280' },
   input:       { width: 90, fontSize: 14, padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit' },
   venmoPreview:{ fontSize: 13, color: '#6b7280' },
-  bulkCard:    { marginTop: 22, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px' },
+  bulkCard:    { marginTop: 22, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '16px 18px' },
   bulkTitle:   { margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: '#111827' },
   bulkHint:    { margin: '0 0 12px', fontSize: 12, color: '#6b7280', lineHeight: 1.6 },
   bulkRow:     { display: 'flex', gap: 10, flexWrap: 'wrap' },
   bulkInput:   { width: 110, fontSize: 14, padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit' },
-  bulkBtn:     { fontSize: 13, fontWeight: 600, color: '#374151', background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 16px', fontFamily: 'inherit' },
   bulkPreview: { marginTop: 12, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px' },
   bulkPreviewRow: { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, padding: '3px 0' },
-  saveBtn:     { fontSize: 14, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', borderRadius: 8, padding: '10px 22px', fontFamily: 'inherit' },
 }

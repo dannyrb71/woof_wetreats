@@ -64,7 +64,7 @@ export default function AuthPage() {
     <div style={s.page}>
       <div style={s.card}>
         <h1 style={s.title}>🐾 Woof Wetreats</h1>
-        <p style={s.subtitle}>Sign in to manage your reservations</p>
+        <p style={s.subtitle}>Sign in to manage your bookings</p>
 
         {/* OAuth buttons */}
         <div style={s.oauthGroup}>
@@ -103,7 +103,7 @@ export default function AuthPage() {
                 <input style={s.input} type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" autoFocus />
               </label>
               {error && <p style={s.error}>{error}</p>}
-              <button style={s.submitBtn} type="submit" disabled={loading}>
+              <button className="btn btn-primary" style={{ width: '100%' }} type="submit" disabled={loading}>
                 {loading ? 'Sending…' : 'Send Reset Link'}
               </button>
               <button type="button" style={s.linkBtn} onClick={() => { setForgot(false); setError('') }}>
@@ -127,7 +127,7 @@ export default function AuthPage() {
                 <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete={tab === 'signup' ? 'new-password' : 'current-password'} minLength={6} />
               </label>
               {error && <p style={s.error}>{error}</p>}
-              <button style={s.submitBtn} type="submit" disabled={loading}>
+              <button className="btn btn-primary" style={{ width: '100%' }} type="submit" disabled={loading}>
                 {loading ? 'Please wait…' : tab === 'signup' ? 'Create Account' : 'Sign In'}
               </button>
             </form>
@@ -146,7 +146,7 @@ export default function AuthPage() {
 
 const s: Record<string, React.CSSProperties> = {
   page:       { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fff' },
-  card:       { background: '#fff', borderRadius: 16, padding: '40px 36px', width: '100%', maxWidth: 400, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
+  card:       { background: '#fff', borderRadius: 'var(--radius-card)', padding: '40px 36px', width: '100%', maxWidth: 400, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   title:      { margin: '0 0 4px', fontSize: 26, fontWeight: 700, textAlign: 'center' },
   subtitle:   { margin: '0 0 24px', color: '#6b7280', textAlign: 'center', fontSize: 14 },
   oauthGroup: { display: 'flex', flexDirection: 'column', gap: 10 },
@@ -160,7 +160,6 @@ const s: Record<string, React.CSSProperties> = {
   label:      { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14, fontWeight: 500 },
   input:      { padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14, outline: 'none' },
   error:      { color: '#ef4444', fontSize: 13, margin: 0 },
-  submitBtn:  { padding: '11px 0', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: 'pointer', marginTop: 4 },
   forgotLink: { display: 'block', margin: '16px auto 0', background: 'none', border: 'none', color: '#2563eb', fontSize: 13, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' },
   linkBtn:    { display: 'block', margin: '4px auto 0', background: 'none', border: 'none', color: '#6b7280', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' },
 }

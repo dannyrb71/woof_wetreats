@@ -31,6 +31,11 @@ export async function routeUser(
   const { data: isAdmin } = await supabase.rpc('is_admin')
   if (isAdmin) { router.replace('/staff'); return }
 
+  // If this user was invited as a household co-owner, link them now. Safe/idempotent:
+  // returns null for users who already have their own client or have no pending invite.
+  // Runs here so BOTH the OAuth callback and the invite/set-password flow claim the invite.
+  await supabase.rpc('claim_household_invite')
+
   const status = await getAuthStatus(supabase)
   switch (status) {
     case 'new':

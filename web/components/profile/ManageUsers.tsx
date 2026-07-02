@@ -39,11 +39,21 @@ export function ManageUsers(props: Props) {
     const email = inviteEmail.trim().toLowerCase()
     if (!email.includes('@')) { setErr('Enter a valid email.'); return }
     setBusy(true); setErr(''); setNotice('')
-    const { error } = await supabase.rpc('set_coowner_invite', { p_client_id: clientId, p_email: email })
+    // Edge function: authorizes + records the invite, then emails an invite via Supabase Auth.
+    const { data, error } = await supabase.functions.invoke('send-coowner-invite', {
+      body: { client_id: clientId, email },
+    })
     setBusy(false)
-    if (error) { setErr(`Could not send invite — ${error.message || 'try again.'}`); return }
+    if (error) {
+      let msg = 'try again.'
+      try { const b = await (error as { context?: { json?: () => Promise<{ error?: string }> } }).context?.json?.(); if (b?.error) msg = b.error } catch { /* ignore */ }
+      setErr(`Could not send invite — ${msg}`)
+      return
+    }
     setAdding(false); setInviteEmail('')
-    setNotice(`Invite ready — ${email} just needs to sign in with that email to join.`)
+    setNotice((data as { already?: boolean } | null)?.already
+      ? `${email} already has an account — they'll join automatically the next time they sign in with it.`
+      : `Invite sent to ${email}. They'll get an email to set a password and join the household.`)
     onChanged()
   }
 

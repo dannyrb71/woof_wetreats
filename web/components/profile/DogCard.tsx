@@ -32,34 +32,24 @@ export interface SharedDog {
   photoSigned: string | null
 }
 
-interface BaseProps {
-  dog:       SharedDog
-  authUid:   string
-  /** Border/accent color driven by service type (staff) or primary (client) */
-  accentColor?: string
-}
-
-interface StaffProps extends BaseProps {
-  role:        'staff'
-  pathPrefix:  string
-  onPhotoUpload: (dogId: string, newPath: string, previewUrl: string) => void
-}
-
-interface ClientProps extends BaseProps {
-  role:        'client'
+// One card, one behaviour on both the client dashboard and the staff profile.
+// `role` only controls the photo-upload path (staff photos live under the
+// client's id via pathPrefix); Edit / Remove / gender are identical for both.
+interface DogCardProps {
+  dog:           SharedDog
+  authUid:       string
+  role:          'staff' | 'client'
+  pathPrefix?:   string
   onPhotoUpdate: (dogId: string, newPath: string, previewUrl: string) => void
   onGenderSave:  (dogId: string, gender: 'male' | 'female') => void
   onEdit:        (dogId: string, fields: { name: string; birthdate: string; gender: 'male' | 'female' }) => Promise<void>
   onRemove:      (dogId: string) => Promise<void>
 }
 
-type Props = StaffProps | ClientProps
-
 // ── Component ─────────────────────────────────────────────────
-export function DogCard(props: Props) {
-  const { dog, authUid, accentColor = 'var(--border)' } = props
+export function DogCard(props: DogCardProps) {
+  const { dog, authUid } = props
 
-  // Client-only edit state
   const [editing,   setEditing]   = useState(false)
   const [eName,     setEName]     = useState(dog.name)
   const [eBirth,    setEBirth]    = useState(dog.birthdate)
@@ -67,7 +57,6 @@ export function DogCard(props: Props) {
   const [saving,    setSaving]    = useState(false)
   const [editErr,   setEditErr]   = useState('')
 
-  // Client-only remove state
   const [confirming, setConfirming] = useState(false)
   const [removing,   setRemoving]   = useState(false)
   const [removeErr,  setRemoveErr]  = useState('')
@@ -79,7 +68,6 @@ export function DogCard(props: Props) {
   }
 
   async function handleSaveEdit() {
-    if (props.role !== 'client') return
     if (!eName.trim()) { setEditErr('Name is required.'); return }
     if (!eBirth)       { setEditErr('Birthdate is required.'); return }
     if (!eGender)      { setEditErr('Gender is required.'); return }
@@ -93,7 +81,6 @@ export function DogCard(props: Props) {
   }
 
   async function handleRemove() {
-    if (props.role !== 'client') return
     setRemoving(true); setRemoveErr('')
     try {
       await props.onRemove(dog.id)
@@ -105,10 +92,10 @@ export function DogCard(props: Props) {
 
   const puppy = isPuppy(dog.birthdate)
 
-  // ── Edit mode (client only) ──
-  if (editing && props.role === 'client') {
+  // ── Edit mode ──
+  if (editing) {
     return (
-      <div style={{ ...s.card, borderColor: accentColor }}>
+      <div style={s.card}>
         {dog.photoSigned
           ? <img src={dog.photoSigned} alt={dog.name} style={s.photo} />
           : <div style={s.avatar}>🐕</div>}
@@ -142,68 +129,50 @@ export function DogCard(props: Props) {
 
   // ── Normal display ──
   return (
-    <div style={{ ...s.card, borderColor: accentColor }}>
+    <div style={s.card}>
       {dog.photoSigned
         ? <img src={dog.photoSigned} alt={dog.name} style={s.photo} />
         : <div style={s.avatar}>🐕</div>}
       <p style={{ ...s.name, color: dogNameColor(dog.gender) }}>{dog.name}</p>
-      <p style={s.meta}>
-        {ageLabel(dog.birthdate)} · {dog.birthdate}
-        {dog.gender && <> · {dog.gender === 'male' ? '♂' : '♀'}</>}
-      </p>
-      {!dog.gender && props.role === 'client' && (
+      <p style={s.meta}>{ageLabel(dog.birthdate)} · {dog.birthdate}</p>
+      {!dog.gender && (
         <div style={s.genderPrompt}>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--warning)', fontWeight: 600 }}>What&apos;s {dog.name}&apos;s gender?</p>
           <div style={{ display: 'flex', gap: 8 }}>
             {(['male', 'female'] as const).map(g => (
-              <button key={g} type="button" onClick={() => (props as ClientProps).onGenderSave(dog.id, g)} style={s.genderToggle}>
+              <button key={g} type="button" onClick={() => props.onGenderSave(dog.id, g)} style={s.genderToggle}>
                 {g === 'male' ? '♂ Male' : '♀ Female'}
               </button>
             ))}
           </div>
         </div>
       )}
-      {!dog.gender && props.role === 'staff' && (
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--warning)' }}>Gender not set</p>
-      )}
       {puppy && <span style={s.puppyBadge}>🐾 Puppy</span>}
 
-      {props.role === 'staff' ? (
-        <DogPhotoUploader
-          dogId={dog.id}
-          authUid={authUid}
-          pathPrefix={(props as StaffProps).pathPrefix}
-          currentPath={dog.photo_url ?? null}
-          onDone={(newPath, previewUrl) => (props as StaffProps).onPhotoUpload(dog.id, newPath, previewUrl)}
-        />
-      ) : (
-        <DogPhotoUploader
-          dogId={dog.id}
-          authUid={authUid}
-          currentPath={dog.photo_url ?? null}
-          onDone={(path, url) => (props as ClientProps).onPhotoUpdate(dog.id, path, url)}
-        />
-      )}
+      <DogPhotoUploader
+        dogId={dog.id}
+        authUid={authUid}
+        pathPrefix={props.pathPrefix}
+        currentPath={dog.photo_url ?? null}
+        onDone={(newPath, previewUrl) => props.onPhotoUpdate(dog.id, newPath, previewUrl)}
+      />
 
-      {/* Client-only: edit + remove */}
-      {props.role === 'client' && (
-        confirming ? (
-          <div style={s.removeConfirm}>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, textAlign: 'center' }}>Remove {dog.name}?</p>
-            {removeErr && <p style={{ margin: 0, fontSize: 12, color: 'var(--error)' }}>{removeErr}</p>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" onClick={handleRemove} disabled={removing} className="btn btn-destructive btn-xs">
-                {removing ? 'Removing…' : 'Yes, Remove'}
-              </button>
-              <button type="button" onClick={() => setConfirming(false)} disabled={removing} className="btn btn-ghost btn-xs">Keep</button>
-            </div>
+      {confirming ? (
+        <div style={s.removeConfirm}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, textAlign: 'center' }}>Remove {dog.name}?</p>
+          {removeErr && <p style={{ margin: 0, fontSize: 12, color: 'var(--error)' }}>{removeErr}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={handleRemove} disabled={removing} className="btn btn-destructive btn-xs">
+              {removing ? 'Removing…' : 'Yes, Remove'}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} disabled={removing} className="btn btn-ghost btn-xs">Keep</button>
           </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-            <button type="button" onClick={openEdit} className="btn btn-outlined btn-xs">Edit</button>
-            <button type="button" onClick={() => setConfirming(true)} className="btn btn-ghost btn-xs">Remove</button>
-          </div>
-        )
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <button type="button" onClick={openEdit} className="btn btn-outlined btn-xs">Edit</button>
+          <button type="button" onClick={() => setConfirming(true)} className="btn btn-destructive-outlined btn-xs">Remove</button>
+        </div>
       )}
     </div>
   )
@@ -211,11 +180,11 @@ export function DogCard(props: Props) {
 
 // ── Styles ─────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  card:        { background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1.5px solid', padding: '20px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, boxShadow: '0 0 3.5px rgba(0,0,0,0.10)' },
-  photo:       { width: 96, height: 96, borderRadius: 12, objectFit: 'cover' as const, border: '2px solid var(--border)' },
-  avatar:      { width: 96, height: 96, borderRadius: 12, background: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 },
-  name:        { margin: 0, fontWeight: 700, fontSize: 15 },
-  meta:        { margin: '0 0 2px', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' as const },
+  card:        { background: '#f1f1f1', borderRadius: 'var(--radius-card)', border: '1px solid #dddddd', padding: '20px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
+  photo:       { width: 96, height: 96, borderRadius: '50%', objectFit: 'cover' as const, border: '2px solid var(--border)' },
+  avatar:      { width: 96, height: 96, borderRadius: '50%', background: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 },
+  name:        { margin: '8px 0 2px', fontWeight: 700, fontSize: 14, textAlign: 'center' as const },
+  meta:        { margin: '0 0 8px', fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center' as const },
   puppyBadge:  { fontSize: 11, fontWeight: 700, background: 'var(--primary-light)', color: 'var(--primary-dark)', padding: '3px 10px', borderRadius: 10 },
   genderPrompt:{ background: 'var(--background)', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column' as const, gap: 8, alignItems: 'center', width: '100%', boxSizing: 'border-box' as const },
   genderToggle:{ fontSize: 13, fontWeight: 600, padding: '6px 14px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--background)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit' },

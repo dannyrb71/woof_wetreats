@@ -21,6 +21,11 @@ function toDbTime(display: string): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`
 }
 
+const MAX_OCCURRENCES = 12
+const toYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const fmtShort = (ymd: string) => new Date(ymd + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+const weekdayName = (ymd: string) => new Date(ymd + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' })
+
 export default function BookingForm() {
   const router   = useRouter()
   const supabase = createClient()
@@ -39,6 +44,12 @@ export default function BookingForm() {
   const [selectedDogs, setSelectedDogs] = useState<Set<string>>(new Set())
   const [payment,      setPayment]      = useState<PaymentMethod>('cash')
   const [careNotes,    setCareNotes]    = useState('')
+
+  // ── Recurring daycare ──────────────────────────────────────
+  const [repeat,      setRepeat]      = useState(false)
+  const [repeatMode,  setRepeatMode]  = useState<'count' | 'until'>('count')
+  const [repeatCount, setRepeatCount] = useState(4)
+  const [repeatUntil, setRepeatUntil] = useState<string | null>(null)
 
   // ── Submit state ───────────────────────────────────────────
   const [submitting,   setSubmitting]   = useState(false)
@@ -116,34 +127,52 @@ export default function BookingForm() {
     })
   }
 
+  function createOne(date: string) {
+    return fetch('/api/booking/create', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_type:   service,
+        dropoff_date:   date,
+        dropoff_time:   toDbTime(dropoffTime),
+        pickup_date:    service === 'daycare' ? date : pickupDate,
+        pickup_time:    toDbTime(pickupTime),
+        payment_method: payment,
+        dog_ids:        Array.from(selectedDogs),
+        care_notes:     careNotes.trim() || undefined,
+      }),
+    })
+  }
+
   async function handleSubmit() {
-    if (!pricing || submitting) return
+    if (!pricing || submitting || !dropoffDate) return
     setSubmitting(true)
     setSubmitError('')
 
     try {
-      const res = await fetch('/api/booking/create', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          service_type:   service,
-          dropoff_date:   dropoffDate,
-          dropoff_time:   toDbTime(dropoffTime),
-          pickup_date:    service === 'daycare' ? dropoffDate : pickupDate,
-          pickup_time:    toDbTime(pickupTime),
-          payment_method: payment,
-          dog_ids:        Array.from(selectedDogs),
-          care_notes:     careNotes.trim() || undefined,
-        }),
-      })
+      // Recurring daycare → create one booking per available (non-blocked) week.
+      if (recurringActive) {
+        let made = 0
+        for (const date of availableOccurrences) {
+          const res = await createOne(date)
+          const json = await res.json()
+          if (!res.ok) {
+            setSubmitError(`Booked ${made} visit${made !== 1 ? 's' : ''}, then hit a problem on ${fmtShort(date)}: ${json.error ?? 'try again'}.`)
+            return
+          }
+          made++
+        }
+        router.push('/dashboard')
+        return
+      }
 
+      // Single booking (boarding or one-off daycare).
+      const res = await createOne(dropoffDate)
       const json = await res.json()
-
       if (!res.ok) {
         setSubmitError(json.error ?? 'Something went wrong. Please try again.')
         return
       }
-
       router.push(`/booking/confirmation?id=${json.reservation.id}`)
     } catch {
       setSubmitError('Network error. Please check your connection and try again.')
@@ -172,7 +201,30 @@ export default function BookingForm() {
   }, [service, dropoffDate, pickupDate, blockedDates])
 
   const rangeIsBlocked = rangeBlockedDates.length > 0
+
+  // Recurring daycare: weekly occurrences from the selected date.
+  const occurrences = React.useMemo(() => {
+    if (service !== 'daycare' || !repeat || !dropoffDate) return []
+    const dates: string[] = []
+    const start = new Date(dropoffDate + 'T00:00:00')
+    for (let i = 0; i < MAX_OCCURRENCES; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i * 7)
+      const ymd = toYmd(d)
+      if (repeatMode === 'until') { if (!repeatUntil || ymd > repeatUntil) break }
+      dates.push(ymd)
+      if (repeatMode === 'count' && dates.length >= repeatCount) break
+    }
+    return dates
+  }, [service, repeat, dropoffDate, repeatMode, repeatCount, repeatUntil])
+
+  const blockedOccurrences   = occurrences.filter(d => blockedDates.has(d))
+  const availableOccurrences = occurrences.filter(d => !blockedDates.has(d))
+  const recurringActive = service === 'daycare' && repeat
+  const perVisit        = pricing?.total ?? 0
+  const recurringTotal  = perVisit * availableOccurrences.length
+
   const canSubmit = !!pricing && !pricingError && !submitting && !rangeIsBlocked
+    && (!recurringActive || availableOccurrences.length > 0)
   const rateLabel: Record<string, string> = {
     regular: 'Regular', extended: 'Extended stay', holiday: 'Holiday', daycare: 'Daycare',
   }
@@ -231,6 +283,65 @@ export default function BookingForm() {
         </div>
       </section>
 
+      {/* ── Repeat weekly (daycare only) ──────────────────── */}
+      {service === 'daycare' && (
+        <section style={s.section}>
+          <label style={{ ...s.checkRow, cursor: 'pointer' }}>
+            <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}
+              style={{ accentColor: 'var(--primary)', width: 16, height: 16 }} />
+            <span style={s.dogName}>Repeat weekly</span>
+          </label>
+
+          {repeat && (
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={s.hint}>
+                Books the same weekday each week{dropoffDate ? ` (every ${weekdayName(dropoffDate)})` : ''}, up to {MAX_OCCURRENCES} visits.
+              </p>
+              <div style={s.toggle}>
+                {(['count', 'until'] as const).map(mode => (
+                  <button key={mode} type="button" onClick={() => setRepeatMode(mode)}
+                    style={{ ...s.toggleBtn, ...(repeatMode === mode ? s.toggleActive : {}) }}>
+                    {mode === 'count' ? 'Number of visits' : 'Until a date'}
+                  </button>
+                ))}
+              </div>
+
+              {repeatMode === 'count' ? (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: '#374151' }}>
+                  Number of visits
+                  <select value={repeatCount} onChange={e => setRepeatCount(Number(e.target.value))} style={s.select}>
+                    {Array.from({ length: MAX_OCCURRENCES - 1 }, (_, i) => i + 2).map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              ) : (
+                <DatePicker label="Repeat until" value={repeatUntil} onChange={setRepeatUntil}
+                  blockedDates={blockedDates} holidayDates={holidayDates} minDate={dropoffDate ?? todayStr} />
+              )}
+
+              {availableOccurrences.length > 0 && (
+                <div style={s.occSummary}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                    {availableOccurrences.length} visit{availableOccurrences.length !== 1 ? 's' : ''}
+                  </p>
+                  <p style={{ margin: '4px 0 0', fontSize: 12, color: '#6b7280', lineHeight: 1.7 }}>
+                    {availableOccurrences.map(fmtShort).join('  ·  ')}
+                  </p>
+                </div>
+              )}
+
+              {blockedOccurrences.length > 0 && (
+                <div style={s.rangeWarning}>
+                  <span style={s.rangeWarningIcon}>⚠️</span>
+                  <p style={s.rangeWarningText}>
+                    We&apos;re unavailable on {blockedOccurrences.map(fmtShort).join(', ')} — {blockedOccurrences.length === 1 ? 'that date' : 'those dates'} will be skipped.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ── Blocked-range warning ────────────────────────── */}
       {rangeIsBlocked && (
         <div style={s.rangeWarning}>
@@ -279,17 +390,8 @@ export default function BookingForm() {
         )}
       </section>
 
-      {/* ── Care notes ────────────────────────────────────── */}
-      <section style={s.section}>
-        <h3 style={s.sectionTitle}>Care notes <span style={s.optional}>(optional)</span></h3>
-        <textarea
-          value={careNotes}
-          onChange={e => setCareNotes(e.target.value)}
-          placeholder="Anything we should know for this stay — feeding schedule, medications, quirks…"
-          rows={3}
-          style={s.textarea}
-        />
-      </section>
+      {/* Care notes field removed — the client's standing Care Notes card is the
+          single source; the saved notes still flow onto the booking via careNotes. */}
 
       {/* ── Live price preview ────────────────────────────── */}
       <section style={{ ...s.section, ...s.priceBox }}>
@@ -304,9 +406,14 @@ export default function BookingForm() {
           <>
             <div style={s.totalRow}>
               <span style={s.totalLabel}>Total</span>
-              <span style={s.totalAmount}>${pricing.total.toFixed(2)}</span>
+              <span style={s.totalAmount}>${(recurringActive ? recurringTotal : pricing.total).toFixed(2)}</span>
             </div>
-            {pricing.total_nights > 0 && (
+            {recurringActive && (
+              <p style={s.priceDetail}>
+                {availableOccurrences.length} visit{availableOccurrences.length !== 1 ? 's' : ''} × ${perVisit.toFixed(2)} each
+              </p>
+            )}
+            {!recurringActive && pricing.total_nights > 0 && (
               <p style={s.priceDetail}>
                 {pricing.total_nights} night{pricing.total_nights !== 1 ? 's' : ''}
                 {pricing.is_extended ? ' · Extended stay rate' : ''}
@@ -319,7 +426,7 @@ export default function BookingForm() {
                 estimate for now.
               </p>
             )}
-            <div style={s.breakdown}>
+            {!recurringActive && <div style={s.breakdown}>
               {pricing.breakdown.slice(0, 5).map((p, i) => (
                 <div key={i} style={s.breakdownRow}>
                   <span style={{ color: '#6b7280', fontSize: 12 }}>
@@ -336,7 +443,7 @@ export default function BookingForm() {
                   + {pricing.breakdown.length - 5} more nights
                 </p>
               )}
-            </div>
+            </div>}
           </>
         )}
       </section>
@@ -386,6 +493,8 @@ const s: Record<string, React.CSSProperties> = {
   dogBirth:      { fontSize: 12, color: '#9ca3af' },
   hint:          { fontSize: 13, color: '#6b7280', margin: '4px 0 0' },
   textarea:      { width: '100%', borderRadius: 8, border: '1px solid #e5e7eb', padding: '10px 12px', fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit', resize: 'vertical', color: '#111827', boxSizing: 'border-box' },
+  select:        { fontSize: 14, padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', cursor: 'pointer' },
+  occSummary:    { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 14px' },
   priceBox:      { background: 'var(--surface-muted)', borderRadius: 'var(--radius-card)', padding: 16, border: '1px solid #e5e7eb', marginTop: 4 },
   totalRow:      { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10 },
   totalLabel:    { fontWeight: 600, fontSize: 15, color: '#111827' },

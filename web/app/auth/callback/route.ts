@@ -38,6 +38,9 @@ export async function GET(request: NextRequest) {
       if (isAdmin) {
         return NextResponse.redirect(`${origin}/staff`)
       }
+      // If this email was pre-authorised as a household co-owner, link it now so
+      // the user drops into the shared household instead of onboarding a new one.
+      await supabase.rpc('claim_household_invite')
       const { data: statusRows } = await supabase.rpc('get_client_auth_status')
       const status = statusRows?.[0]?.status
       const dest =

@@ -9,6 +9,7 @@ import { getHolidayDateRange } from '@/lib/pricing-engine'
 import { ServicePill } from '@/components/shared/molecules/ServicePill'
 import { StatusBadge } from '@/components/shared/molecules/StatusBadge'
 import { AddDogButton } from '@/components/shared/molecules/AddDogButton'
+import { DogCard } from '@/components/profile/DogCard'
 
 // ── Constants ──────────────────────────────────────────────────
 const TIME_SLOTS: { value: string; label: string }[] = []
@@ -186,6 +187,7 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   const [detail,      setDetail]      = useState<ClientDetail | null>(null)
   const [clientSince, setClientSince] = useState<string | null>(null)
   const [calRes,      setCalRes]      = useState<CalRes[]>([])
+  const [paidMap,     setPaidMap]     = useState<Record<string, number>>({})
   const [calLoading,  setCalLoading]  = useState(true)
   const [dogs,        setDogs]        = useState<DogRow[]>(household.dogs)
 
@@ -201,6 +203,15 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
     ])
     if (detR.data?.[0]) setDetail(detR.data[0])
     setCalRes((resR.data ?? []) as CalRes[])
+
+    // Amount paid per booking (payment ledger) so Outstanding nets out partials.
+    const ids = (resR.data ?? []).map((r: { id: string }) => r.id)
+    const pm: Record<string, number> = {}
+    if (ids.length) {
+      const { data: pays } = await supabase.from('reservation_payments').select('reservation_id, amount').in('reservation_id', ids)
+      for (const p of pays ?? []) pm[p.reservation_id] = (pm[p.reservation_id] ?? 0) + Number(p.amount)
+    }
+    setPaidMap(pm)
     if (cliR.data?.created_at) {
       const d = new Date(cliR.data.created_at)
       setClientSince(d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }))
@@ -226,8 +237,9 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   const activeRes   = calRes.find(r => r.status === 'in_progress')
   const nextUpcoming = calRes.filter(r => r.status === 'upcoming' && r.dropoff_date >= todayYmd)
     .sort((a, b) => a.dropoff_date.localeCompare(b.dropoff_date))[0] ?? null
-  const unpaid      = calRes.filter(r => !r.paid && r.status !== 'cancelled')
-  const unpaidTotal = unpaid.reduce((s, r) => s + Number(r.total_price), 0)
+  const unpaidTotal = calRes
+    .filter(r => r.status !== 'cancelled')
+    .reduce((s, r) => s + Math.max(0, Number(r.total_price) - (paidMap[r.id] ?? 0)), 0)
   const femaleDogs  = dogs.filter(d => d.gender === 'female').length
   const maleDogs    = dogs.filter(d => d.gender === 'male').length
   const displayRes  = activeRes ?? nextUpcoming
@@ -346,20 +358,6 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   // ── Photo overrides ────────────────────────────────────────
   const [photoOverrides, setPhotoOverrides] = useState<Record<string, string>>({})
 
-  // ── Dog overflow menu ──────────────────────────────────────
-  const [openMenuId,      setOpenMenuId]      = useState<string | null>(null)
-  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null)
-  const [removingDogId,   setRemovingDogId]   = useState<string | null>(null)
-  const [removeErr,       setRemoveErr]       = useState('')
-
-  async function removeDog(dogId: string) {
-    setRemovingDogId(dogId); setRemoveErr('')
-    const { error } = await supabase.from('dogs').delete().eq('id', dogId)
-    setRemovingDogId(null)
-    if (error) { setRemoveErr('Could not remove — try again.'); return }
-    setRemoveConfirmId(null); setOpenMenuId(null)
-    setDogs(prev => prev.filter(d => d.id !== dogId))
-  }
 
   // ── Add Dog ────────────────────────────────────────────────
   const [showAddDog,   setShowAddDog]   = useState(false)
@@ -678,69 +676,37 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
               {dogs.length === 0 && !showAddDog && (
                 <p style={{ fontSize: 13, color: 'var(--text-secondary)', fontStyle: 'italic' }}>No dogs on file.</p>
               )}
-              {removeErr && <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--error)' }}>{removeErr}</p>}
 
               <div style={s.dogGrid}>
-                {dogs.map((dog: DogRow) => {
-                  const photo = photoOverrides[dog.id] ?? dog.photoSigned
-                  return (
-                    <div key={dog.id} style={{ ...s.dogCard, position: 'relative' }}>
-                      {/* Kebab in top-right corner of card */}
-                      <button type="button"
-                        onClick={() => { setOpenMenuId(openMenuId === dog.id ? null : dog.id); setRemoveConfirmId(null) }}
-                        style={s.kebabBtn}
-                        aria-label="More options"
-                        title="More options">
-                        ⋯
-                      </button>
-                      {openMenuId === dog.id && (
-                        <div style={s.overflowMenu}>
-                          {removeConfirmId === dog.id ? (
-                            <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Remove {dog.name}?</span>
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <button type="button" onClick={() => removeDog(dog.id)} disabled={removingDogId === dog.id} className="btn btn-destructive btn-xs">
-                                  {removingDogId === dog.id ? '…' : 'Remove'}
-                                </button>
-                                <button type="button" onClick={() => { setRemoveConfirmId(null); setOpenMenuId(null) }} className="btn btn-ghost btn-xs">
-                                  Keep
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <button type="button" onClick={() => setRemoveConfirmId(dog.id)}
-                              style={s.overflowItem}>
-                              Remove dog
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {/* Circular photo */}
-                      {photo
-                        ? <img src={photo} alt={dog.name} style={s.dogCircle} />
-                        : <div style={s.dogCircleBlank}>🐕</div>}
-                      {/* Name — gender color, no icon */}
-                      <p style={{ margin: '8px 0 2px', fontWeight: 700, fontSize: 14, color: dogNameColor(dog.gender), textAlign: 'center' }}>
-                        {dog.name}
-                      </p>
-                      {/* Age + birthdate — --text-secondary for ADA */}
-                      <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center' }}>
-                        {ageLabel(dog.birthdate)} · {dog.birthdate}
-                      </p>
-                      {/* Change Photo */}
-                      <DogPhotoUploader
-                        dogId={dog.id}
-                        authUid={household.client_id}
-                        pathPrefix={household.client_id}
-                        currentPath={dog.photo_url ?? null}
-                        onDone={(newPath, previewUrl) => {
-                          setPhotoOverrides(prev => ({ ...prev, [dog.id]: previewUrl }))
-                          onUpdate({ ...household, dogs: household.dogs.map((d: DogRow) => d.id === dog.id ? { ...d, photo_url: newPath, photoSigned: previewUrl } : d) })
-                        }}
-                      />
-                    </div>
-                  )
-                })}
+                {dogs.map((dog: DogRow) => (
+                  <DogCard
+                    key={dog.id}
+                    role="staff"
+                    dog={{ ...dog, photoSigned: photoOverrides[dog.id] ?? dog.photoSigned }}
+                    authUid={household.client_id}
+                    pathPrefix={household.client_id}
+                    onPhotoUpdate={(dogId, newPath, previewUrl) => {
+                      setPhotoOverrides(prev => ({ ...prev, [dogId]: previewUrl }))
+                      setDogs(prev => prev.map(d => d.id === dogId ? { ...d, photo_url: newPath, photoSigned: previewUrl } : d))
+                      onUpdate({ ...household, dogs: household.dogs.map((d: DogRow) => d.id === dogId ? { ...d, photo_url: newPath, photoSigned: previewUrl } : d) })
+                    }}
+                    onGenderSave={async (dogId, gender) => {
+                      const { error } = await supabase.from('dogs').update({ gender }).eq('id', dogId)
+                      if (error) return
+                      setDogs(prev => prev.map(d => d.id === dogId ? { ...d, gender } : d))
+                    }}
+                    onEdit={async (dogId, fields) => {
+                      const { error } = await supabase.from('dogs').update({ name: fields.name, birthdate: fields.birthdate, gender: fields.gender }).eq('id', dogId)
+                      if (error) throw new Error('Could not save — try again.')
+                      setDogs(prev => prev.map(d => d.id === dogId ? { ...d, ...fields } : d))
+                    }}
+                    onRemove={async (dogId) => {
+                      const { error } = await supabase.from('dogs').delete().eq('id', dogId)
+                      if (error) throw new Error('Could not remove — try again.')
+                      setDogs(prev => prev.filter(d => d.id !== dogId))
+                    }}
+                  />
+                ))}
               </div>
             </div>
 
@@ -818,13 +784,8 @@ const s: Record<string, React.CSSProperties> = {
   pill:          { display: 'inline-flex', alignItems: 'center', height: 22, padding: '0 10px', borderRadius: 999, fontSize: 11, fontWeight: 600, lineHeight: 1, boxSizing: 'border-box', whiteSpace: 'nowrap' },
   // Dog cards
   dogGrid:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 14, marginTop: 4 },
-  dogCard:       { background: 'var(--background)', borderRadius: 16, padding: '16px 10px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  dogCircle:     { width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', display: 'block', border: '2px solid var(--border)' },
-  dogCircleBlank:{ width: 80, height: 80, borderRadius: '50%', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, border: '2px solid var(--border)' },
+  dogCard:       { background: '#f1f1f1', borderRadius: 'var(--radius-card)', border: '1px solid #dddddd', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', padding: '16px 10px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   // Overflow kebab: absolute top-right of card, --text-secondary for ADA contrast
-  kebabBtn:      { position: 'absolute', top: 6, right: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text-secondary)', padding: '4px 6px', fontFamily: 'inherit', lineHeight: 1, fontWeight: 700, letterSpacing: 1 },
-  overflowMenu:  { position: 'absolute', top: 32, right: 0, background: 'var(--surface)', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.13)', zIndex: 20, minWidth: 140, border: '1px solid var(--border)' },
-  overflowItem:  { display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 14px', fontSize: 13, color: 'var(--error)', fontFamily: 'inherit' },
   addDogForm:    { background: 'var(--background)', borderRadius: 12, padding: '14px 16px', marginBottom: 16 },
   genderToggle:  { fontSize: 13, fontWeight: 600, padding: '6px 14px', border: '1.5px solid', cursor: 'pointer', fontFamily: 'inherit' },
   // Forms

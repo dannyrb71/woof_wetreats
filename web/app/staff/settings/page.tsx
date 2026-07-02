@@ -7,13 +7,15 @@ import { LandingHeroUploader } from '@/components/staff/LandingHeroUploader'
 import { StaffManager } from '@/components/staff/StaffManager'
 import { PricingEditor } from '@/components/staff/PricingEditor'
 import { LandingCopyEditor } from '@/components/staff/LandingCopyEditor'
+import { AnnouncementEditor } from '@/components/staff/AnnouncementEditor'
 
-type TabKey = 'landing' | 'pricing' | 'staff'
+type TabKey = 'landing' | 'pricing' | 'staff' | 'announcement'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'pricing',      label: 'Pricing' },
   { key: 'staff',        label: 'Staff' },
   { key: 'landing',      label: 'Landing Page' },
+  { key: 'announcement', label: 'Announcement' },
 ]
 
 export default function StaffSettingsPage() {
@@ -43,13 +45,14 @@ export default function StaffSettingsPage() {
         <h2 style={s.pageTitle}>Settings</h2>
 
         {/* ── Tabs ── */}
-        <div style={s.tabBar}>
+        <div className="tab-bar">
           {TABS.map(t => (
             <button
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              style={{ ...s.tab, ...(tab === t.key ? s.tabActive : {}) }}
+              aria-current={tab === t.key ? 'page' : undefined}
+              className={tab === t.key ? 'tab-btn tab-btn-active' : 'tab-btn'}
             >
               {t.label}
             </button>
@@ -80,6 +83,13 @@ export default function StaffSettingsPage() {
             <>
               <h3 className="section-label" style={{ margin: '0 0 12px' }}>Pricing rates</h3>
               <PricingEditor />
+            </>
+          )}
+
+          {tab === 'announcement' && (
+            <>
+              <h3 className="section-label" style={{ margin: '0 0 12px' }}>Client announcement</h3>
+              <AnnouncementEditor />
             </>
           )}
 

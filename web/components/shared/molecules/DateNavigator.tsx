@@ -46,5 +46,5 @@ const s: Record<string, React.CSSProperties> = {
   navBtn:    { fontSize: 22, lineHeight: 1, width: 38, height: 38, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
   dateInput: { fontSize: 14, padding: '8px 12px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit', cursor: 'pointer' },
   dateLong:  { margin: '10px 0 0', fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 },
-  todayPill: { fontSize: 12, fontWeight: 700, color: 'var(--primary)', background: 'var(--primary-light)', borderRadius: 999, padding: '3px 10px', flexShrink: 0 },
+  todayPill: { fontSize: 12, fontWeight: 700, color: 'var(--primary-dark)', background: 'var(--primary-light)', borderRadius: 999, padding: '3px 10px', flexShrink: 0 },
 }

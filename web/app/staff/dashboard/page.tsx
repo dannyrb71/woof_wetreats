@@ -45,6 +45,7 @@ export default function DashboardPage() {
   const [name, setName] = useState('')
   const [date, setDate] = useState(todayStr())
   const [res, setRes] = useState<Res[]>([])
+  const [payments, setPayments] = useState<{ amount: number; paid_on: string }[]>([])
   const [mg, setMg] = useState<{ scheduled_time: string }[]>([])
   const [here, setHere] = useState<HereDog[]>([])
   const [loading, setLoading] = useState(true)
@@ -58,15 +59,17 @@ export default function DashboardPage() {
     if (!isAdmin) { router.replace('/'); return }
     setName((session.user.user_metadata?.full_name as string)?.split(' ')[0] ?? '')
 
-    const [resR, mgR] = await Promise.all([
+    const [resR, mgR, payR] = await Promise.all([
       supabase.from('reservations')
         .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, total_price, paid, paid_at')
         .neq('status', 'cancelled'),
       supabase.from('meet_greets').select('scheduled_time').eq('scheduled_date', d).neq('status', 'cancelled'),
+      supabase.from('reservation_payments').select('amount, paid_on'),
     ])
     const rows = (resR.data ?? []) as Res[]
     setRes(rows)
     setMg((mgR.data ?? []) as { scheduled_time: string }[])
+    setPayments((payR.data ?? []) as { amount: number; paid_on: string }[])
 
     // Currently here = boarding stays spanning the selected date.
     const present = rows.filter(r => r.service_type === 'boarding' && r.dropoff_date <= d && r.pickup_date > d)
@@ -105,16 +108,11 @@ export default function DashboardPage() {
   const departures = notCancelled.filter(r => r.service_type === 'boarding' && r.pickup_date === D)
   const nextTime = (list: string[]) => list.filter(Boolean).sort()[0] ?? null
 
-  // Collected = money received in the window, keyed on the payment date (paid_at,
-  // stamped when Paid is toggled), NOT the booking's drop-off date. paid_at is
-  // converted to a local YYYY-MM-DD so "collected on this date" matches the calendar.
-  // (Bookings paid before paid_at existed have a NULL stamp and don't count until re-toggled.)
+  // Collected = money actually received in the window, summed from the payment
+  // ledger by each payment's date (paid_on) — so partial payments count on the
+  // day they landed, regardless of the booking's drop-off date.
   const paidSum = (from: string, to: string) =>
-    notCancelled.filter(r => {
-      if (!r.paid || !r.paid_at) return false
-      const collected = new Date(r.paid_at).toLocaleDateString('en-CA')
-      return collected >= from && collected <= to
-    }).reduce((s, r) => s + Number(r.total_price), 0)
+    payments.filter(p => p.paid_on >= from && p.paid_on <= to).reduce((s, p) => s + Number(p.amount), 0)
   const revenueToday = paidSum(D, D)
   const revenueWeek  = paidSum(week.start, week.end)
   const revenueMonth = paidSum(month.start, month.end)

@@ -9,6 +9,7 @@ import TimePicker from '@/components/booking/TimePicker'
 import { FeeBreakdownModal } from '@/components/staff/FeeBreakdownModal'
 import { ServicePill } from '@/components/shared/molecules/ServicePill'
 import { StatusBadge, type StatusType } from '@/components/shared/molecules/StatusBadge'
+import { PaymentsPanel } from '@/components/staff/PaymentsPanel'
 
 // DB status keys (underscore) → StatusBadge molecule keys (hyphen)
 const STATUS_KEY: Record<string, StatusType> = {
@@ -32,8 +33,8 @@ function fmtTime(t: string) { if (!t) return ''; const [h, m] = t.split(':').map
 function nights(a: string, b: string) { return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000) }
 
 // ── One reservation card with cancel + edit ────────────────────
-function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
-  res: Reservation; color: string; dogs: Dog[]; blocked: Set<string>; rates: RateTable | null; onChanged: () => void
+function ReservationRow({ res, color, dogs, blocked, rates, amountPaid, onChanged }: {
+  res: Reservation; color: string; dogs: Dog[]; blocked: Set<string>; rates: RateTable | null; amountPaid: number; onChanged: () => void
 }) {
   const supabase = createClient()
   const isBoarding = res.service_type === 'boarding'
@@ -41,50 +42,14 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [showBreakdown, setShowBreakdown] = useState(false)
+  const [showPay, setShowPay] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const [paid, setPaid] = useState(res.paid)
-  const [paidBusy, setPaidBusy] = useState(false)
-  const [pm, setPm] = useState<'cash' | 'venmo'>((res.payment_method as 'cash' | 'venmo') || 'cash')
-  const [pmBusy, setPmBusy] = useState(false)
 
-  async function togglePaid() {
-    const next = !paid
-    setPaidBusy(true); setPaid(next); setErr('')
-    const { error } = await supabase.from('reservations').update({ paid: next, paid_at: next ? new Date().toISOString() : null }).eq('id', res.id)
-    setPaidBusy(false)
-    if (error) { setPaid(!next); setErr('Could not update paid status — try again.'); return }
-    onChanged() // refresh so the section's unpaid total recomputes
-  }
-
-  // Correct the recorded payment METHOD after the fact. Routes through the SAME
-  // update-reservation edge function the Edit flow uses, so the total reprices to
-  // the new method's rate — EXCEPT when the price was manually overridden, in
-  // which case we pass the override through so the edge function preserves it.
-  async function setMethod(next: 'cash' | 'venmo') {
-    if (next === pm) return
-    const prev = pm
-    setPmBusy(true); setPm(next); setErr('')
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { setPm(prev); setPmBusy(false); setErr('Session expired — refresh.'); return }
-
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/update-reservation`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_ANON_KEY },
-      body: JSON.stringify({
-        reservation_id: res.id, service_type: res.service_type,
-        dropoff_date: res.dropoff_date, dropoff_time: res.dropoff_time,
-        pickup_date: res.pickup_date, pickup_time: res.pickup_time,
-        payment_method: next, dog_ids: res.dog_ids,
-        // Overridden price → pass it back so it's preserved; otherwise null → recalc.
-        price_override: res.price_overridden ? Number(res.total_price) : null,
-      }),
-    })
-    const json = await resp.json().catch(() => ({}))
-    setPmBusy(false)
-    if (!resp.ok) { setPm(prev); setErr(json.error ?? 'Could not update payment method — try again.'); return }
-    onChanged()
-  }
+  const total     = Number(res.total_price)
+  const fullyPaid = total > 0 && amountPaid >= total
+  const partial   = amountPaid > 0 && !fullyPaid
+  const payStatus: StatusType = fullyPaid ? 'paid' : partial ? 'partial' : 'unpaid'
 
   if (editing) {
     return (
@@ -111,7 +76,7 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
           <ServicePill type={res.service_type} />
           <StatusBadge status={STATUS_KEY[res.status] ?? 'completed'} />
           {res.status !== 'cancelled' && (
-            <StatusBadge status={paid ? 'paid' : 'unpaid'} />
+            <StatusBadge status={payStatus} />
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -146,25 +111,18 @@ function ReservationRow({ res, color, dogs, blocked, rates, onChanged }: {
             </>
           ) : (
             <>
-              <button type="button" onClick={togglePaid} disabled={paidBusy}
-                className={paid ? 'btn btn-ghost btn-xs' : 'btn btn-success btn-xs'}>
-                {paid ? 'Mark Unpaid' : 'Mark Paid'}
+              <button type="button" onClick={() => setShowPay(v => !v)}
+                className={fullyPaid ? 'btn btn-ghost btn-xs' : 'btn btn-success btn-xs'}>
+                {showPay ? 'Hide payments' : fullyPaid ? '✅ Paid' : `Payments · $${Math.max(0, total - amountPaid).toFixed(2)} due`}
               </button>
-              {!paid && (
-                <span style={s.pmToggle} title="Correct the recorded payment method">
-                  {(['cash', 'venmo'] as const).map(m => (
-                    <button key={m} type="button" onClick={() => setMethod(m)} disabled={pmBusy}
-                      style={{ ...s.pmSeg, ...(pm === m ? s.pmSegOn : {}), cursor: pmBusy ? 'not-allowed' : 'pointer' }}>
-                      {m === 'cash' ? '💵 Cash' : '💙 Venmo'}
-                    </button>
-                  ))}
-                </span>
-              )}
               <button type="button" onClick={() => { setEditing(true); setErr('') }} className="btn btn-outlined btn-xs">Edit</button>
               <button type="button" onClick={() => { setConfirming(true); setErr('') }} className="btn btn-destructive-outlined btn-xs">Cancel Booking</button>
             </>
           )}
         </div>
+      )}
+      {showPay && res.status !== 'cancelled' && (
+        <PaymentsPanel reservationId={res.id} total={total} defaultMethod={(res.payment_method as 'cash' | 'venmo') || 'cash'} onChanged={onChanged} />
       )}
     </div>
   )
@@ -485,11 +443,13 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [reminderState, setReminderState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [paidMap, setPaidMap] = useState<Record<string, number>>({})
 
-  // Outstanding balance = unpaid, non-cancelled reservations.
+  // Outstanding balance = each non-cancelled booking's total minus what's been paid
+  // (from the payment ledger), so partial payments reduce the balance.
   const unpaidTotal = reservations
-    .filter(r => !r.paid && r.status !== 'cancelled')
-    .reduce((t, r) => t + Number(r.total_price), 0)
+    .filter(r => r.status !== 'cancelled')
+    .reduce((t, r) => t + Math.max(0, Number(r.total_price) - (paidMap[r.id] ?? 0)), 0)
 
   // Item 4: staff-initiated, per-click. Inserts a warm, low-pressure in-app
   // notification the client sees on their dashboard. Never automatic/scheduled.
@@ -529,6 +489,14 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
         ;(dogMap[row.reservation_id] ??= []).push(nm)
       }
     }
+    // Amount paid per booking (payment ledger), for the Paid/Partial/Balance display.
+    const pm: Record<string, number> = {}
+    if (ids.length) {
+      const { data: pays } = await supabase.from('reservation_payments').select('reservation_id, amount').in('reservation_id', ids)
+      for (const p of pays ?? []) pm[p.reservation_id] = (pm[p.reservation_id] ?? 0) + Number(p.amount)
+    }
+    setPaidMap(pm)
+
     setReservations(rows.map(r => ({ ...r, dogs: dogMap[r.id] ?? [], dog_ids: dogIdMap[r.id] ?? [] })) as Reservation[])
     setLoading(false)
   }, [clientId, supabase])
@@ -568,7 +536,7 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
 
       {loading ? <p style={{ fontSize: 13, color: '#9ca3af' }}>Loading…</p>
         : reservations.length === 0 ? <p style={{ fontSize: 13, color: '#9ca3af' }}>No bookings yet.</p>
-        : reservations.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} dogs={dogs} blocked={blocked} rates={rates} onChanged={afterChange} />)}
+        : reservations.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} dogs={dogs} blocked={blocked} rates={rates} amountPaid={paidMap[r.id] ?? 0} onChanged={afterChange} />)}
     </div>
   )
 }

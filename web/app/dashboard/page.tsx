@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { processImageFile, ImageValidationError } from '@/lib/image-utils'
@@ -8,6 +8,9 @@ import { VENMO_USERNAME } from '@/lib/payment'
 import { SiteNav } from '@/components/SiteNav'
 import { DogCard, SharedDog } from '@/components/profile/DogCard'
 import { BalanceSection } from '@/components/profile/BalanceSection'
+import BookingForm from '@/components/booking/BookingForm'
+import { parseAnnouncement } from '@/components/staff/AnnouncementEditor'
+import { ManageUsers } from '@/components/profile/ManageUsers'
 import { formatPhone } from '@/lib/format'
 import { ServicePill } from '@/components/shared/molecules/ServicePill'
 import { StatusBadge, type StatusType } from '@/components/shared/molecules/StatusBadge'
@@ -32,6 +35,9 @@ interface ClientProfile {
   vet_address:             string
   care_notes:              string
   meet_greet_status:       'needed' | 'requested' | 'scheduled' | 'completed'
+  auth_id:                 string | null
+  secondary_auth_id:       string | null
+  secondary_invite_email:  string | null
 }
 
 interface MeetGreetRecord {
@@ -77,6 +83,11 @@ function nightsBetween(a: string, b: string): number {
   return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000)
 }
 
+function greeting(): string {
+  const h = new Date().getHours()
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+}
+
 function resStrokeColor(status: Reservation['status'], serviceType: 'boarding' | 'daycare'): string {
   if (status === 'cancelled' || status === 'completed') return 'var(--status-no-activity)'
   if (status === 'in_progress') return 'var(--status-in-progress)'
@@ -115,9 +126,8 @@ function ProfileSection({ profile, onSaved }: {
   const [draft,    setDraft]    = useState(profile)
   const [saving,   setSaving]   = useState(false)
   const [err,      setErr]      = useState('')
-  const [expanded, setExpanded] = useState(false)
 
-  function startEdit() { setDraft({ ...profile }); setErr(''); setEditing(true); setExpanded(true) }
+  function startEdit() { setDraft({ ...profile }); setErr(''); setEditing(true) }
   function set(field: keyof ClientProfile, value: string) { setDraft(prev => ({ ...prev, [field]: value })) }
 
   async function save() {
@@ -135,20 +145,12 @@ function ProfileSection({ profile, onSaved }: {
     <div style={s.sectionCard}>
       <div style={s.profileHeader}>
         <h3 style={s.sectionTitle}>Your Profile</h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {!editing && (
-            <button type="button" onClick={() => setExpanded(e => !e)} className="btn btn-ghost btn-sm">
-              {expanded ? 'Hide ↑' : 'Show ↓'}
-            </button>
-          )}
-          {!editing && (
-            <button type="button" onClick={startEdit} className="btn btn-outlined btn-sm">Edit</button>
-          )}
-        </div>
+        {!editing && (
+          <button type="button" onClick={startEdit} className="btn btn-outlined btn-sm">Edit</button>
+        )}
       </div>
 
-      {(expanded || editing) && (
-        editing ? (
+      {editing ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={s.profileGrid}>
               <label style={s.profileLabel}>First name
@@ -185,13 +187,6 @@ function ProfileSection({ profile, onSaved }: {
                 <input value={draft.vet_address} onChange={e => set('vet_address', e.target.value)} style={s.profileInput} />
               </label>
             </div>
-            <p style={s.profileGroupLabel}>Standing care notes</p>
-            <p style={{ margin: '-8px 0 4px', fontSize: 12, color: 'var(--text-secondary)' }}>
-              Pre-fills into all future bookings. Override per-stay during booking if needed.
-            </p>
-            <textarea value={draft.care_notes} onChange={e => set('care_notes', e.target.value)} rows={3}
-              placeholder="e.g. Feed twice daily, takes Apoquel pill with food…"
-              style={{ ...s.profileInput, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
             {err && <p style={{ margin: 0, fontSize: 13, color: 'var(--error)' }}>{err}</p>}
             <div style={{ display: 'flex', gap: 10 }}>
               <button type="button" onClick={save} disabled={saving} className="btn btn-primary btn-sm">
@@ -222,14 +217,62 @@ function ProfileSection({ profile, onSaved }: {
                 <ProfileRow label="Address" value={shown.vet_address} />
               </div>
             </div>
-            {shown.care_notes && (
-              <div>
-                <p style={s.profileGroupLabel}>Standing care notes</p>
-                <p style={s.careNotesDisplay}>{shown.care_notes}</p>
-              </div>
-            )}
           </div>
-        )
+        )}
+    </div>
+  )
+}
+
+// ── Care Notes card (client-editable standing care notes) ──────
+function CareNotesSection({ profile, onSaved }: {
+  profile: ClientProfile
+  onSaved: (updated: ClientProfile) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft,   setDraft]   = useState(profile.care_notes)
+  const [saving,  setSaving]  = useState(false)
+  const [err,     setErr]     = useState('')
+
+  async function save() {
+    setSaving(true); setErr('')
+    const updated = { ...profile, care_notes: draft }
+    const resp = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) })
+    let json: Record<string, unknown> = {}
+    try { json = await resp.json() } catch { /* empty */ }
+    if (!resp.ok) { setErr((json.error as string) ?? 'Save failed — try again.'); setSaving(false); return }
+    onSaved(updated); setEditing(false); setSaving(false)
+  }
+
+  return (
+    <div style={{ ...s.sectionCard, borderLeft: '3px solid var(--warning)' }}>
+      <div style={s.profileHeader}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>📋</span>
+          <h3 style={{ ...s.sectionTitle, marginBottom: 0 }}>Care Notes</h3>
+        </div>
+        {!editing && (
+          <button type="button" onClick={() => { setDraft(profile.care_notes); setErr(''); setEditing(true) }} className="btn btn-outlined btn-sm">Edit</button>
+        )}
+      </div>
+
+      {editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+            Pre-fills into all future bookings. You can override per-stay during booking.
+          </p>
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={4}
+            placeholder="e.g. Feed twice daily, takes Apoquel pill with food…"
+            style={{ ...s.profileInput, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+          {err && <p style={{ margin: 0, fontSize: 13, color: 'var(--error)' }}>{err}</p>}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" onClick={save} disabled={saving} className="btn btn-primary btn-sm">{saving ? 'Saving…' : 'Save'}</button>
+            <button type="button" onClick={() => setEditing(false)} className="btn btn-ghost btn-sm">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        profile.care_notes?.trim()
+          ? <p style={{ ...s.careNotesDisplay, marginTop: 12 }}>{profile.care_notes}</p>
+          : <p style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--text-secondary)', fontStyle: 'italic' }}>No care notes yet — add feeding, medication, or handling instructions.</p>
       )}
     </div>
   )
@@ -473,6 +516,67 @@ function MeetGreetSection({ status, record, address, onRequest }: {
 }
 
 // ── Page ───────────────────────────────────────────────────────
+// ── Past & Cancelled — month navigator + "See all" (by year) ───
+function PastBookings({ past, onCancel }: { past: Reservation[]; onCancel: (id: string) => void }) {
+  const months = useMemo(() => {
+    const set = new Set(past.map(r => r.dropoff_date.slice(0, 7)))  // YYYY-MM
+    return [...set].sort((a, b) => b.localeCompare(a))               // newest first
+  }, [past])
+  const byYear = useMemo(() => {
+    const map: Record<string, Reservation[]> = {}
+    for (const r of past) { (map[r.dropoff_date.slice(0, 4)] ??= []).push(r) }
+    return Object.entries(map)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([y, list]) => [y, list.slice().sort((a, b) => b.dropoff_date.localeCompare(a.dropoff_date))] as [string, Reservation[]])
+  }, [past])
+
+  const [idx,     setIdx]     = useState(0)
+  const [showAll, setShowAll] = useState(false)
+
+  if (past.length === 0) return null
+
+  const activeMonth = months[idx]
+  const monthLabel  = new Date(activeMonth + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const monthList   = past.filter(r => r.dropoff_date.slice(0, 7) === activeMonth)
+    .sort((a, b) => b.dropoff_date.localeCompare(a.dropoff_date))
+
+  return (
+    <div style={s.sectionCard}>
+      <div style={s.profileHeader}>
+        <h3 style={{ ...s.sectionTitle, color: 'var(--text-secondary)', marginBottom: 0 }}>Past &amp; Cancelled</h3>
+        <button type="button" onClick={() => setShowAll(true)} className="btn btn-ghost btn-sm">See all</button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, margin: '14px 0' }}>
+        <button type="button" onClick={() => setIdx(i => Math.min(months.length - 1, i + 1))} disabled={idx >= months.length - 1}
+          style={s.navChevron} aria-label="Older month">‹</button>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', minWidth: 140, textAlign: 'center' }}>{monthLabel}</span>
+        <button type="button" onClick={() => setIdx(i => Math.max(0, i - 1))} disabled={idx <= 0}
+          style={s.navChevron} aria-label="Newer month">›</button>
+      </div>
+
+      {monthList.map(res => <ReservationCard key={res.id} res={res} onCancel={onCancel} />)}
+
+      {showAll && (
+        <div style={s.modalOverlay} onClick={() => setShowAll(false)}>
+          <div style={s.modalCard} onClick={e => e.stopPropagation()}>
+            <div style={{ ...s.profileHeader, marginBottom: 8 }}>
+              <h3 style={{ ...s.sectionTitle, marginBottom: 0 }}>All Past &amp; Cancelled</h3>
+              <button type="button" onClick={() => setShowAll(false)} className="btn btn-ghost btn-sm">Close</button>
+            </div>
+            {byYear.map(([year, list]) => (
+              <div key={year} style={{ marginTop: 16 }}>
+                <p style={{ ...s.sectionTitle, color: 'var(--text-secondary)', marginBottom: 10 }}>{year}</p>
+                {list.map(res => <ReservationCard key={res.id} res={res} onCancel={onCancel} />)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const router   = useRouter()
   const supabase = createClient()
@@ -486,10 +590,44 @@ export default function DashboardPage() {
   const [error,         setError]         = useState('')
   const [cancelError,   setCancelError]   = useState('')
   const [addingDog,     setAddingDog]     = useState(false)
+  const [showNewBooking, setShowNewBooking] = useState(false)
+  const [announcement, setAnnouncement] = useState<{ message: string; enabled: boolean } | null>(null)
+  const [annDismissed, setAnnDismissed] = useState(true)
   const [mgStatus,      setMgStatus]      = useState<ClientProfile['meet_greet_status']>('needed')
   const [mgRecord,      setMgRecord]      = useState<MeetGreetRecord | null>(null)
   const [mgAddress,     setMgAddress]     = useState<string | null>(null)
   const [notifications, setNotifications] = useState<ClientNotification[]>([])
+
+  // Open the inline booking form when arrived via the nav "+ New Booking" (?new=1).
+  useEffect(() => {
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1') {
+      setShowNewBooking(true)
+    }
+  }, [])
+
+  // Staff-broadcast announcement (shown at top; dismissal remembered per browser
+  // until the message text changes).
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc('get_announcement')
+      const a = parseAnnouncement(data as string | null)
+      if (a.enabled && a.message.trim()) {
+        setAnnouncement(a)
+        setAnnDismissed(typeof window !== 'undefined' && localStorage.getItem('woof_ann_dismissed') === a.message)
+      }
+    })()
+  }, [supabase])
+
+  function dismissAnnouncement() {
+    if (typeof window !== 'undefined' && announcement) localStorage.setItem('woof_ann_dismissed', announcement.message)
+    setAnnDismissed(true)
+  }
+
+  async function refreshHousehold() {
+    const { data } = await supabase.from('clients_client_view')
+      .select('auth_id, secondary_auth_id, secondary_invite_email').single()
+    if (data) setProfile(prev => prev ? { ...prev, auth_id: data.auth_id, secondary_auth_id: data.secondary_auth_id, secondary_invite_email: data.secondary_invite_email } : prev)
+  }
 
   useEffect(() => {
     async function load() {
@@ -499,7 +637,7 @@ export default function DashboardPage() {
 
       const [profileRes, dogsRes, resRes] = await Promise.all([
         supabase.from('clients_client_view')
-          .select('id, first_name, last_name, phone, email, address, emergency_contact_name, emergency_contact_phone, vet_name, vet_phone, vet_address, care_notes, meet_greet_status')
+          .select('id, auth_id, secondary_auth_id, secondary_invite_email, first_name, last_name, phone, email, address, emergency_contact_name, emergency_contact_phone, vet_name, vet_phone, vet_address, care_notes, meet_greet_status')
           .single(),
         supabase.from('dogs').select('id, name, birthdate, photo_url, gender').eq('active', true).order('name'),
         supabase.from('reservations')
@@ -527,6 +665,9 @@ export default function DashboardPage() {
         vet_address:             p?.vet_address             ?? '',
         care_notes:              p?.care_notes              ?? '',
         meet_greet_status:       p?.meet_greet_status       ?? 'needed',
+        auth_id:                 p?.auth_id                 ?? null,
+        secondary_auth_id:       p?.secondary_auth_id       ?? null,
+        secondary_invite_email:  p?.secondary_invite_email  ?? null,
       })
 
       const status = p?.meet_greet_status ?? 'needed'
@@ -627,43 +768,76 @@ export default function DashboardPage() {
       <SiteNav />
       <main style={s.main}>
 
-        {/* ── Page header — full width ── */}
+        {/* ── Staff announcement banner ── */}
+        {announcement && !annDismissed && (
+          <div style={{ ...s.noteCard, marginBottom: 20 }}>
+            <span style={{ fontSize: 16, lineHeight: 1.4 }}>📢</span>
+            <p style={s.noteMsg}>{announcement.message}</p>
+            <button type="button" onClick={dismissAnnouncement} className="btn btn-xs" style={{ background: 'transparent', color: 'var(--primary-dark)', border: '1.5px solid var(--primary-dark)' }} aria-label="Dismiss announcement">Dismiss</button>
+          </div>
+        )}
+
+        {/* ── Page header ── */}
         <div style={s.pageHeader}>
-          <h2 style={s.greeting}>Welcome back, {firstName}! 👋</h2>
-          {mgStatus === 'completed' && mgAddress && (
-            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mgAddress)}`}
-              target="_blank" rel="noopener noreferrer" style={s.mgMapLink}>
-              📍 {mgAddress}
-            </a>
-          )}
+          <h2 style={s.greeting}>{greeting()}, {firstName}! 👋</h2>
         </div>
-
-        {/* ── Notifications — full width, at top ── */}
-        {notifications.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-            {notifications.map(n => (
-              <div key={n.id} style={s.noteCard}>
-                <span style={{ fontSize: 16, lineHeight: 1.4 }}>🔔</span>
-                <p style={s.noteMsg}>{n.message}</p>
-                <button type="button" onClick={() => dismissNotification(n.id)} className="btn btn-outlined btn-xs" aria-label="Dismiss">Dismiss</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── Meet & Greet — full width when not completed ── */}
-        {mgStatus !== 'completed' && (
-          <div style={{ marginBottom: 20 }}>
-            <h3 style={s.sectionTitle}>Meet &amp; Greet</h3>
-            <MeetGreetSection status={mgStatus} record={mgRecord} address={mgAddress} onRequest={requestMeetGreet} />
-          </div>
-        )}
 
         {/* ── 1/3 + 2/3 two-column layout ── */}
         <div className="profile-layout-client">
 
-          {/* ── LEFT — dogs + balance ── */}
+          {/* ── LEFT — location, balance, profile ── */}
           <div className="profile-col-left">
+
+            {/* Our Location / Meet & Greet */}
+            <div style={s.sectionCard}>
+              <h3 style={s.sectionTitle}>{mgStatus === 'completed' ? 'Location' : 'Meet & Greet'}</h3>
+              {mgStatus === 'completed' && mgAddress ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <iframe
+                    title="Meet &amp; Greet location"
+                    src={`https://maps.google.com/maps?q=${encodeURIComponent(mgAddress)}&z=15&output=embed`}
+                    style={{ width: '100%', height: 180, border: 0, borderRadius: 12, display: 'block' }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mgAddress)}`}
+                    target="_blank" rel="noopener noreferrer" style={s.mgMapLink}>📍 {mgAddress}</a>
+                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mgAddress)}`}
+                    target="_blank" rel="noopener noreferrer" className="btn btn-outlined btn-sm" style={{ alignSelf: 'flex-start' }}>Get directions</a>
+                </div>
+              ) : (
+                <MeetGreetSection status={mgStatus} record={mgRecord} address={mgAddress} onRequest={requestMeetGreet} />
+              )}
+            </div>
+
+            {/* Balance */}
+            <BalanceSection reservations={reservations} />
+
+            {/* Profile */}
+            {profile && <ProfileSection profile={profile} onSaved={updated => setProfile(updated)} />}
+
+            {/* Manage Users (co-owners) */}
+            {profile && clientId && (
+              <ManageUsers
+                clientId={clientId}
+                authUid={authUid}
+                primaryAuthId={profile.auth_id}
+                primaryName={`${profile.first_name} ${profile.last_name}`.trim()}
+                primaryEmail={profile.email}
+                secondaryAuthId={profile.secondary_auth_id}
+                secondaryEmail={profile.secondary_invite_email}
+                onChanged={refreshHousehold}
+              />
+            )}
+
+          </div>{/* /col-left */}
+
+          {/* ── RIGHT — dogs, care notes, bookings ── */}
+          <div className="profile-col-right">
+
+            {cancelError && (
+              <p style={{ color: 'var(--error)', fontSize: 13, margin: '0 0 8px' }}>{cancelError}</p>
+            )}
 
             {/* Dogs */}
             <div style={s.sectionCard}>
@@ -675,7 +849,6 @@ export default function DashboardPage() {
                     dog={dog}
                     role="client"
                     authUid={authUid}
-                    accentColor="var(--primary)"
                     onPhotoUpdate={handlePhotoUpdate}
                     onGenderSave={handleGenderSave}
                     onEdit={handleEditDog}
@@ -695,23 +868,44 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Balance */}
-            <BalanceSection reservations={reservations} />
+            {/* Care Notes */}
+            {profile && <CareNotesSection profile={profile} onSaved={updated => setProfile(updated)} />}
 
-          </div>{/* /col-left */}
-
-          {/* ── RIGHT — reservations + profile ── */}
-          <div className="profile-col-right">
-
-            {cancelError && (
-              <p style={{ color: 'var(--error)', fontSize: 13, margin: '0 0 8px' }}>{cancelError}</p>
-            )}
-
-            {/* Active reservations */}
+            {/* Bookings */}
             <div style={s.sectionCard}>
-              <h3 style={s.sectionTitle}>Bookings</h3>
+              <div style={s.profileHeader}>
+                <h3 style={{ ...s.sectionTitle, marginBottom: 0 }}>Bookings</h3>
+                {!showNewBooking && (
+                  <button type="button" onClick={() => setShowNewBooking(true)} className="btn btn-booking btn-sm">+ New Booking</button>
+                )}
+              </div>
+
+              {/* Inline new-booking form (expands like the staff version) */}
+              {showNewBooking && (
+                <div style={s.inlineForm}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <h4 style={{ ...s.sectionTitle, marginBottom: 0 }}>New Booking</h4>
+                    <button type="button" onClick={() => setShowNewBooking(false)} className="btn btn-ghost btn-sm">Close</button>
+                  </div>
+                  <BookingForm />
+                </div>
+              )}
+
+              {/* Booking-change notifications — attached to the bookings area */}
+              {notifications.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, margin: '14px 0' }}>
+                  {notifications.map(n => (
+                    <div key={n.id} style={s.noteCard}>
+                      <span style={{ fontSize: 16, lineHeight: 1.4 }}>🔔</span>
+                      <p style={s.noteMsg}>{n.message}</p>
+                      <button type="button" onClick={() => dismissNotification(n.id)} className="btn btn-xs" style={{ background: 'transparent', color: 'var(--primary-dark)', border: '1.5px solid var(--primary-dark)' }} aria-label="Dismiss">Dismiss</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {active.length === 0 && past.length === 0 && (
-                <div style={s.empty}>
+                <div style={{ ...s.empty, marginTop: 14 }}>
                   <span style={{ fontSize: 36 }}>🏠</span>
                   <p style={{ margin: '12px 0 0', color: 'var(--text-secondary)', fontSize: 14 }}>
                     No bookings yet.{' '}
@@ -719,19 +913,18 @@ export default function DashboardPage() {
                   </p>
                 </div>
               )}
-              {active.map(res => <ReservationCard key={res.id} res={res} onCancel={handleCancel} />)}
+              <div style={{ marginTop: active.length ? 14 : 0 }}>
+                {active.map(res => <ReservationCard key={res.id} res={res} onCancel={handleCancel} />)}
+              </div>
+
+              <p style={s.bookingDisclaimer}>
+                Need to change or cancel a booking? All changes are handled by us —{' '}
+                <a href="sms:+14155960160" style={{ color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>text us at (415) 596-0160</a>.
+              </p>
             </div>
 
-            {/* Profile */}
-            {profile && <ProfileSection profile={profile} onSaved={updated => setProfile(updated)} />}
-
-            {/* Past reservations */}
-            {past.length > 0 && (
-              <div style={s.sectionCard}>
-                <h3 style={{ ...s.sectionTitle, color: 'var(--text-secondary)' }}>Past Bookings</h3>
-                {past.map(res => <ReservationCard key={res.id} res={res} onCancel={handleCancel} />)}
-              </div>
-            )}
+            {/* Past & Cancelled — month navigator + See all */}
+            <PastBookings past={past} onCancel={handleCancel} />
 
           </div>{/* /col-right */}
         </div>{/* /profile-layout-client */}
@@ -752,10 +945,14 @@ const s: Record<string, React.CSSProperties> = {
   mgMapLink:        { color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' },
   // Sections
   sectionCard:      { background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1px solid var(--border)', padding: '20px 22px', boxShadow: '0 0 3.5px rgba(0,0,0,0.10)' },
-  sectionTitle:     { margin: '0 0 14px', fontSize: 14, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  navChevron:       { fontSize: 22, lineHeight: 1, width: 38, height: 38, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+  inlineForm:       { marginTop: 14, padding: '16px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', display: 'flex', flexDirection: 'column', gap: 8 },
+  bookingDisclaimer:{ margin: '16px 0 0', paddingTop: 14, borderTop: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 },
+  modalOverlay:     { position: 'fixed', inset: 0, background: 'rgba(46,42,38,0.45)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 50, overflowY: 'auto' },
+  modalCard:        { background: 'var(--surface)', borderRadius: 'var(--radius-card)', padding: '20px 22px', boxShadow: 'var(--hover-shadow)', width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto' },
+  sectionTitle:     { margin: '0 0 14px', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
   // Dogs
   dogRow:           { display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 14 },
-  addDogBtn:        { fontSize: 13, fontWeight: 600, color: 'var(--primary)', background: 'var(--surface)', border: '1.5px dashed var(--primary-light)', borderRadius: 10, padding: '10px 20px', cursor: 'pointer', fontFamily: 'inherit' },
   addDogCard:       { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', padding: '20px 22px', boxShadow: '0 0 3.5px rgba(0,0,0,0.10)', display: 'flex', flexDirection: 'column', gap: 12 },
   addDogLabel:      { display: 'flex', flexDirection: 'column' as const, gap: 4, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' },
   addDogInput:      { fontSize: 13, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit', marginTop: 2 },
@@ -771,10 +968,7 @@ const s: Record<string, React.CSSProperties> = {
   resCard:          { background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1px solid var(--border)', borderLeft: '4px solid', padding: '18px 20px', marginBottom: 14, boxShadow: '0 0 3.5px rgba(0,0,0,0.10)' },
   resHeader:        { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   resHeaderLeft:    { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  serviceBadge:     { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1.5px solid', background: 'transparent' },
   resPrice:         { fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' },
-  paidBadge:        { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: '#e8f5e9', color: 'var(--success)' },
-  unpaidBadge:      { fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: 'var(--background)', color: 'var(--warning)' },
   resDogs:          { margin: '0 0 10px', fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' },
   resDates:         { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 },
   dateLabel:        { fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 8 },

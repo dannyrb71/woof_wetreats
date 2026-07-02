@@ -75,8 +75,15 @@ export default function StaffPage() {
     load()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sort key: a household's alphabetically-first dog name (falls back to the
+  // owner's name if the household has no dogs yet).
+  const sortKey = (h: Household) => {
+    const names = h.dogs.map(d => d.name).filter(Boolean).sort((x, y) => x.localeCompare(y))
+    return (names[0] ?? h.full_name).toLowerCase()
+  }
+
   // Visible cards: pill filter, then search narrows WITHIN it, then alphabetical
-  // by client name (the default order — no separate sort control).
+  // by the household's first dog's name (no separate sort control).
   const sorted = useMemo(() => {
     const q = search.trim().toLowerCase()
     return households
@@ -87,7 +94,7 @@ export default function StaffPage() {
         // Match ANY dog's name → the whole household card surfaces.
         return h.dogs.some(d => d.name.toLowerCase().includes(q))
       })
-      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+      .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
   }, [households, filter, search])
 
   // Legend/summary counts across ALL households (not the filtered view).

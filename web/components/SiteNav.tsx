@@ -36,11 +36,17 @@ function Chevron() {
 export function SiteNav() {
   const router = useRouter()
   const pathname = usePathname()
+  const dashActive = isActiveLink(pathname, '/dashboard')
+  // When active, avatar + name both go blue so they read as one unit.
+  const clientAvatarSkin = dashActive
+    ? { background: 'rgba(72,130,175,0.18)', color: 'var(--dog-male)' }
+    : { background: 'var(--primary-light)', color: 'var(--primary-dark)' }
   const [viewer,      setViewer]      = useState<ViewerState>('loading')
   const [firstName,   setFirstName]   = useState('')      // client profile link
   const [staffName,   setStaffName]   = useState('')
   const [staffEmail,  setStaffEmail]  = useState('')
   const [staffAvatar, setStaffAvatar] = useState<string | null>(null)
+  const [staffAvatarErr, setStaffAvatarErr] = useState(false)
   const [menuOpen,    setMenuOpen]    = useState(false)
   const [mobileOpen,  setMobileOpen]  = useState(false)
   const [showProfile, setShowProfile] = useState(false)
@@ -74,8 +80,8 @@ export function SiteNav() {
   const initial = (staffName || staffEmail || '?').trim().charAt(0).toUpperCase()
 
   function Avatar({ size = 32 }: { size?: number }) {
-    return staffAvatar
-      ? <img src={staffAvatar} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }} />
+    return staffAvatar && !staffAvatarErr
+      ? <img src={staffAvatar} alt="" referrerPolicy="no-referrer" onError={() => setStaffAvatarErr(true)} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }} />
       : <span style={{ ...s.avatarFallback, width: size, height: size, fontSize: size * 0.42 }}>{initial}</span>
   }
 
@@ -130,9 +136,13 @@ export function SiteNav() {
                 className={isActiveLink(pathname, '/') ? 'nav-link nav-link-active' : 'nav-link'} style={s.link}>Home</a>
               <a href="/house-rules" aria-current={isActiveLink(pathname, '/house-rules') ? 'page' : undefined}
                 className={isActiveLink(pathname, '/house-rules') ? 'nav-link nav-link-active' : 'nav-link'} style={s.link}>House Rules</a>
-              <a href="/booking" style={s.cta}>+ New Booking</a>
+              <a href="/dashboard?new=1" style={s.cta}>+ New Booking</a>
               <button type="button" onClick={signOut} style={s.signOut}>Sign Out</button>
-              <a href="/dashboard" style={s.profile}><span>{firstName}</span></a>
+              <a href="/dashboard" aria-current={dashActive ? 'page' : undefined}
+                style={{ ...s.profile, ...(dashActive ? { color: 'var(--dog-male)' } : {}) }}>
+                <span style={{ ...s.clientAvatar, ...clientAvatarSkin }}>{(firstName || '?').trim().charAt(0).toUpperCase()}</span>
+                <span>{firstName}</span>
+              </a>
             </nav>
           )}
 
@@ -174,8 +184,13 @@ export function SiteNav() {
               style={{ ...s.mobileItem, ...(isActiveLink(pathname, '/') ? { color: 'var(--dog-male)' } : {}) }} onClick={() => setMobileOpen(false)}>Home</a>
             <a href="/house-rules" aria-current={isActiveLink(pathname, '/house-rules') ? 'page' : undefined}
               style={{ ...s.mobileItem, ...(isActiveLink(pathname, '/house-rules') ? { color: 'var(--dog-male)' } : {}) }} onClick={() => setMobileOpen(false)}>House Rules</a>
-            <a href="/booking" style={{ ...s.mobileItem, color: 'var(--status-in-progress)' }} onClick={() => setMobileOpen(false)}>+ New Booking</a>
-            <a href="/dashboard" style={s.mobileItem} onClick={() => setMobileOpen(false)}>{firstName}</a>
+            <a href="/dashboard?new=1" style={{ ...s.mobileItem, color: 'var(--status-in-progress)' }} onClick={() => setMobileOpen(false)}>+ New Booking</a>
+            <a href="/dashboard" aria-current={dashActive ? 'page' : undefined}
+              style={{ ...s.mobileItem, display: 'flex', alignItems: 'center', gap: 8, ...(dashActive ? { color: 'var(--dog-male)' } : {}) }}
+              onClick={() => setMobileOpen(false)}>
+              <span style={{ ...s.clientAvatar, ...clientAvatarSkin }}>{(firstName || '?').trim().charAt(0).toUpperCase()}</span>
+              {firstName}
+            </a>
             <button type="button" style={{ ...s.mobileItem, color: 'var(--error)' }} onClick={signOut}>Sign Out</button>
           </>}
           {viewer === 'logged_out' && <>
@@ -207,7 +222,8 @@ const s: Record<string, React.CSSProperties> = {
   link:         { fontSize: 14, color: 'var(--text-primary)', textDecoration: 'none', fontWeight: 600 },
   cta:          { fontSize: 14, fontWeight: 600, color: '#fff', background: 'var(--status-in-progress)', padding: '8px 16px', borderRadius: 999, textDecoration: 'none' },
   signOut:      { fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)', background: 'none', border: '1px solid var(--border)', borderRadius: 999, padding: '7px 14px', cursor: 'pointer', fontFamily: 'inherit' },
-  profile:      { display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none' },
+  profile:      { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none' },
+  clientAvatar: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontSize: 13, fontWeight: 800, flexShrink: 0 },
 
   avatarBtn:    { display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--text-secondary)', borderRadius: 999 },
   avatarFallback:{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'var(--primary-light)', color: 'var(--primary-dark)', fontWeight: 800 },

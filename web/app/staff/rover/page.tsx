@@ -39,6 +39,9 @@ export default function RoverPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [delBusy, setDelBusy] = useState(false)
+  const [showPast, setShowPast] = useState(false)
+  const [showUpcoming, setShowUpcoming] = useState(false)
+  const [dogsOpen, setDogsOpen] = useState(true)
 
   async function deleteBooking(id: string) {
     setDelBusy(true)
@@ -108,10 +111,27 @@ export default function RoverPage() {
   // Sort by date (boarding = drop-off date; daycare = its single date = drop-off).
   // Active (in-progress + upcoming) soonest-first; completed drop to a Past section,
   // most-recent first — consistent with how the rest of the app shows past activity.
-  const activeRes = reservations.filter(r => r.status !== 'completed')
+  // Today (LA). In Progress = service is active today OR starts today (even if the
+  // dog hasn't arrived). Upcoming = starts after today, grouped by start date.
+  // Past = the service has fully ended.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const endOf = (r: RoverRes) => r.service_type === 'boarding' ? r.pickup_date : r.dropoff_date
+  const inProgress = reservations.filter(r => r.dropoff_date <= today && today <= endOf(r))
     .sort((a, b) => a.dropoff_date.localeCompare(b.dropoff_date))
-  const pastRes = reservations.filter(r => r.status === 'completed')
+  const upcoming = reservations.filter(r => r.dropoff_date > today)
+    .sort((a, b) => a.dropoff_date.localeCompare(b.dropoff_date))
+  const pastRes = reservations.filter(r => endOf(r) < today)
     .sort((a, b) => b.dropoff_date.localeCompare(a.dropoff_date))
+
+  // Group upcoming into date buckets (already sorted ascending).
+  const upcomingGroups: [string, RoverRes[]][] = []
+  for (const r of upcoming) {
+    const last = upcomingGroups[upcomingGroups.length - 1]
+    if (last && last[0] === r.dropoff_date) last[1].push(r)
+    else upcomingGroups.push([r.dropoff_date, [r]])
+  }
+  const dayLabel = (ymd: string) => new Date(ymd + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  const hasAny = inProgress.length + upcoming.length > 0
 
   const renderBooking = (r: RoverRes) => (
     editingId === r.id ? (
@@ -121,8 +141,24 @@ export default function RoverPage() {
     ) : (
       <div key={r.id} style={{ ...s.resCard, borderLeftColor: r.status === 'completed' ? '#9ca3af' : (SVC[r.service_type as ServiceType] ?? '#9ca3af'), opacity: r.status === 'completed' ? 0.7 : 1 }}>
         <div style={s.resTop}>
-          <ServicePill type={r.service_type as ServiceType} />
-          <span style={s.resStatus}>{r.status.replace('_', ' ')}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <ServicePill type={r.service_type as ServiceType} />
+            <span style={s.resStatus}>{r.status.replace('_', ' ')}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {delConfirm === r.id ? (
+              <>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>Delete?</span>
+                <button type="button" onClick={() => deleteBooking(r.id)} disabled={delBusy} className="btn btn-destructive btn-xs">{delBusy ? '…' : 'Yes'}</button>
+                <button type="button" onClick={() => setDelConfirm(null)} className="btn btn-ghost btn-xs">Keep</button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => { setEditingId(r.id); setShowBooking(false) }} className="btn btn-outlined btn-xs">Edit</button>
+                <button type="button" onClick={() => setDelConfirm(r.id)} className="btn btn-destructive-outlined btn-xs">Delete</button>
+              </>
+            )}
+          </div>
         </div>
         <p style={s.resDogs}>{r.dogs.join(', ') || '—'}</p>
         <p style={s.resDates}>
@@ -130,20 +166,6 @@ export default function RoverPage() {
             ? <>{fmtDate(r.dropoff_date)} · {fmtTime(r.dropoff_time)} → {fmtDate(r.pickup_date)} · {fmtTime(r.pickup_time)}</>
             : <>{fmtDate(r.dropoff_date)} · ⬇ {fmtTime(r.dropoff_time)} ⬆ {fmtTime(r.pickup_time)}</>}
         </p>
-        <div style={s.resActions}>
-          {delConfirm === r.id ? (
-            <>
-              <span style={{ fontSize: 12, color: '#374151', fontWeight: 600 }}>Delete this booking?</span>
-              <button type="button" onClick={() => deleteBooking(r.id)} disabled={delBusy} className="btn btn-destructive btn-xs">{delBusy ? '…' : 'Yes, delete'}</button>
-              <button type="button" onClick={() => setDelConfirm(null)} className="btn btn-ghost btn-xs">Keep</button>
-            </>
-          ) : (
-            <>
-              <button type="button" onClick={() => { setEditingId(r.id); setShowBooking(false) }} className="btn btn-outlined btn-xs">Edit</button>
-              <button type="button" onClick={() => setDelConfirm(r.id)} className="btn btn-destructive-outlined btn-xs">Delete</button>
-            </>
-          )}
-        </div>
       </div>
     )
   )
@@ -153,12 +175,9 @@ export default function RoverPage() {
       <SiteNav />
       <main style={s.main}>
         <div className="staff-header-2col" style={s.header}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={s.avatar}>R</div>
-            <div className="page-header-text">
-              <h2 style={s.title}>Rover</h2>
-              <p style={s.subtitle}>Rover bookings — no login, no fees. {dogs.length} dog{dogs.length !== 1 ? 's' : ''} on file.</p>
-            </div>
+          <div className="page-header-text">
+            <h2 style={s.title}>Rover</h2>
+            <p style={s.subtitle}>Rover bookings — no login, no fees. {dogs.length} dog{dogs.length !== 1 ? 's' : ''} on file.</p>
           </div>
           {!showBooking && (
             <div className="page-header-cta">
@@ -175,36 +194,82 @@ export default function RoverPage() {
           />
         )}
 
-        {/* ── Bookings (active, soonest-first) ── */}
+        {/* ── Bookings (active soonest-first; past collapsed) ── */}
         <section style={s.section}>
-          <h3 style={s.sectionTitle}>Bookings</h3>
-          {activeRes.length === 0
-            ? <p style={s.muted}>No upcoming Rover bookings.</p>
-            : activeRes.map(renderBooking)}
-        </section>
+          <div style={s.card}>
+            <div style={s.sectionHead}>
+              <h3 style={{ ...s.sectionTitle, margin: 0 }}>Bookings</h3>
+              {showUpcoming && (
+                <button type="button" onClick={() => setShowUpcoming(false)} className="btn btn-ghost btn-sm">See less</button>
+              )}
+            </div>
 
-        {/* ── Past bookings (completed, most-recent first) ── */}
-        {pastRes.length > 0 && (
-          <section style={s.section}>
-            <h3 style={{ ...s.sectionTitle, color: 'var(--text-secondary)' }}>Past Bookings</h3>
-            {pastRes.map(renderBooking)}
-          </section>
-        )}
+            {!hasAny && pastRes.length === 0 && <p style={s.muted}>No Rover bookings yet.</p>}
+
+            {inProgress.length > 0 ? (
+              <>
+                <p style={{ ...s.groupLabel, color: 'var(--status-in-progress)' }}>In Progress</p>
+                {inProgress.map(renderBooking)}
+              </>
+            ) : (
+              upcoming.length > 0 && !showUpcoming && <p style={s.muted}>Nothing in progress today.</p>
+            )}
+
+            {showUpcoming && upcomingGroups.map(([date, list]) => (
+              <React.Fragment key={date}>
+                <p style={s.groupLabel}>{dayLabel(date)}</p>
+                {list.map(renderBooking)}
+              </React.Fragment>
+            ))}
+
+            {upcoming.length > 0 && (
+              <button type="button" onClick={() => setShowUpcoming(v => !v)} className="btn btn-ghost btn-sm" style={{ marginTop: 10 }}>
+                {showUpcoming ? 'See less' : `See more (${upcoming.length} upcoming)`}
+              </button>
+            )}
+
+            {pastRes.length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                <button type="button" onClick={() => setShowPast(p => !p)} className="btn btn-ghost btn-sm">
+                  {showPast ? 'Hide' : 'Show'} past bookings ({pastRes.length})
+                </button>
+                {showPast && (
+                  <div style={{ marginTop: 12 }}>
+                    <p style={s.groupLabel}>Past &amp; Completed</p>
+                    {pastRes.map(renderBooking)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* ── Dogs ── */}
         <section style={s.section}>
-          <div style={s.sectionHead}>
-            <h3 style={s.sectionTitle}>Rover Dogs</h3>
-            {!addingDog && <AddDogButton onClick={() => setAddingDog(true)} />}
-          </div>
-          {addingDog && (
-            <AddRoverDog roverId={roverId} onClose={() => setAddingDog(false)} onAdded={() => { setAddingDog(false); load() }} />
-          )}
-          <div style={s.dogGrid}>
-            {dogs.map(d => (
-              <RoverDogCard key={d.id} dog={d} roverId={roverId} meetGreets={meetGreets.filter(m => m.dog_id === d.id)} onChanged={load} />
-            ))}
-            {dogs.length === 0 && <p style={s.muted}>No dogs yet.</p>}
+          <div style={s.card}>
+            <div style={s.sectionHead}>
+              <button type="button" onClick={() => setDogsOpen(o => !o)} style={s.collapseToggle} aria-expanded={dogsOpen}>
+                <h3 style={{ ...s.sectionTitle, margin: 0 }}>Rover Dogs ({dogs.length})</h3>
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none"
+                  style={{ transition: 'transform 0.2s ease', transform: dogsOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                  <polyline points="4,7 10,13 16,7" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {!addingDog && dogsOpen && <AddDogButton onClick={() => setAddingDog(true)} />}
+            </div>
+            {dogsOpen && (
+              <>
+                {addingDog && (
+                  <AddRoverDog roverId={roverId} onClose={() => setAddingDog(false)} onAdded={() => { setAddingDog(false); load() }} />
+                )}
+                <div style={s.dogGrid}>
+                  {dogs.map(d => (
+                    <RoverDogCard key={d.id} dog={d} roverId={roverId} meetGreets={meetGreets.filter(m => m.dog_id === d.id)} onChanged={load} />
+                  ))}
+                  {dogs.length === 0 && <p style={s.muted}>No dogs yet.</p>}
+                </div>
+              </>
+            )}
           </div>
         </section>
       </main>
@@ -468,22 +533,24 @@ function RoverDogCard({ dog, roverId, meetGreets, onChanged }: {
 const s: Record<string, React.CSSProperties> = {
   page:        { minHeight: '100vh', background: 'var(--page-bg)' },
   center:      { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
-  main:        { maxWidth: 920, margin: '0 auto', padding: '28px 24px 60px' },
+  main:        { maxWidth: 960, margin: '0 auto', padding: '28px 24px 60px' },
   header:      { marginBottom: 24 },
   avatar:      { width: 52, height: 52, borderRadius: '50%', background: '#16a34a', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 800, flexShrink: 0 },
   title:       { margin: 0, fontSize: 22, fontWeight: 800, color: '#111827' },
   subtitle:    { margin: '2px 0 0', fontSize: 13, color: '#6b7280' },
-  section:     { marginBottom: 32 },
+  section:     { marginBottom: 24 },
+  card:        { background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1px solid var(--border)', padding: '20px 22px', boxShadow: '0 0 3.5px rgba(0,0,0,0.10)' },
+  groupLabel:  { margin: '18px 0 10px', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
+  collapseToggle: { display: 'inline-flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' },
   sectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle:{ margin: '0 0 12px', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' },
   muted:       { fontSize: 13, color: '#9ca3af', margin: 0 },
   resCard:     { background: '#fff', borderRadius: 'var(--radius-card)', border: '1px solid #e5e7eb', borderLeft: '4px solid', padding: '14px 16px', marginBottom: 10 },
-  resTop:      { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 },
+  resTop:      { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
   svcBadge:    { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: '1.5px solid', background: 'transparent' },
   resStatus:   { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: '#f3f4f6', color: '#374151', textTransform: 'capitalize' },
   resDogs:     { margin: '0 0 4px', fontSize: 15, fontWeight: 700, color: '#111827' },
   resDates:    { margin: 0, fontSize: 13, color: '#374151' },
-  resActions:  { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: '1px solid #f3f4f6' },
   dogGrid:     { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 },
   dogCard:     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
   dogTop:      { display: 'flex', alignItems: 'center', gap: 12 },

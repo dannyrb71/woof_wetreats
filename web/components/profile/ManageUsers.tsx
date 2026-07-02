@@ -1,6 +1,10 @@
 'use client'
 import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase'
+// NOTE: create the client once (lazy useState initializer). Calling createClient()
+// directly in the component body makes a fresh, un-hydrated auth client on every
+// render, which can send RPCs before the session loads -> auth.uid() is null ->
+// SECURITY DEFINER checks fail with "not authorized".
 
 interface Props {
   clientId:        string
@@ -15,7 +19,7 @@ interface Props {
 
 export function ManageUsers(props: Props) {
   const { clientId, authUid, primaryAuthId, primaryName, primaryEmail, secondaryAuthId, secondaryEmail, onChanged } = props
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
 
   const [adding,      setAdding]      = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
@@ -37,7 +41,7 @@ export function ManageUsers(props: Props) {
     setBusy(true); setErr(''); setNotice('')
     const { error } = await supabase.rpc('set_coowner_invite', { p_client_id: clientId, p_email: email })
     setBusy(false)
-    if (error) { setErr('Could not send invite — try again.'); return }
+    if (error) { setErr(`Could not send invite — ${error.message || 'try again.'}`); return }
     setAdding(false); setInviteEmail('')
     setNotice(`Invite ready — ${email} just needs to sign in with that email to join.`)
     onChanged()
@@ -47,7 +51,7 @@ export function ManageUsers(props: Props) {
     setBusy(true); setErr(''); setNotice('')
     const { error } = await supabase.rpc('remove_coowner', { p_client_id: clientId })
     setBusy(false)
-    if (error) { setErr('Could not remove — try again.'); return }
+    if (error) { setErr(`Could not remove — ${error.message || 'try again.'}`); return }
     onChanged()
   }
 

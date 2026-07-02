@@ -115,7 +115,7 @@ export function ManageUsers(props: Props) {
           <div style={{ minWidth: 0 }}>
             <p style={s.name}>Partner <span style={{ ...s.youBadge, background: 'var(--surface-muted)', color: 'var(--text-secondary)' }}>pending</span></p>
             <p style={s.email}>{secondaryEmail}</p>
-            <p style={s.pendingHint}>Ask them to sign in with this email to join.</p>
+            <p style={s.pendingHint}>They&apos;ll get an email to set a password and join. Or they can sign up with this email.</p>
           </div>
           <button type="button" onClick={removePartner} disabled={busy} className="btn btn-ghost btn-xs">Cancel</button>
         </div>

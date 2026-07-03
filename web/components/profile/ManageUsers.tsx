@@ -14,11 +14,12 @@ interface Props {
   primaryEmail:    string
   secondaryAuthId: string | null
   secondaryEmail:  string | null
+  secondaryName:   string
   onChanged:       () => void
 }
 
 export function ManageUsers(props: Props) {
-  const { clientId, authUid, primaryAuthId, primaryName, primaryEmail, secondaryAuthId, secondaryEmail, onChanged } = props
+  const { clientId, authUid, primaryAuthId, primaryName, primaryEmail, secondaryAuthId, secondaryEmail, secondaryName, onChanged } = props
   const [supabase] = useState(() => createClient())
 
   const [adding,      setAdding]      = useState(false)
@@ -99,7 +100,7 @@ export function ManageUsers(props: Props) {
       {partnerJoined && (
         <div style={s.row}>
           <div style={{ minWidth: 0 }}>
-            <p style={s.name}>Partner{isPartnerYou && <span style={s.youBadge}>you</span>}</p>
+            <p style={s.name}>{secondaryName || 'Partner'}{isPartnerYou && <span style={s.youBadge}>you</span>}</p>
             <p style={s.email}>{secondaryEmail}</p>
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>

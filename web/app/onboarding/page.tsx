@@ -215,6 +215,11 @@ export default function OnboardingPage() {
       // Pre-fill email from auth session
       setProfile(p => ({ ...p, email: session.user.email ?? '' }))
 
+      // Co-owner safety net: if this user was invited to a household, link them now.
+      // Covers invited partners who signed up directly instead of via the invite link —
+      // without this they'd be treated as a brand-new customer and sent through onboarding.
+      await supabase.rpc('claim_household_invite')
+
       // If profile is already complete, skip onboarding
       const { data } = await supabase.rpc('get_client_auth_status')
       const status = data?.[0]?.status

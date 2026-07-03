@@ -25,6 +25,16 @@ function fmtDate(ymd: string) {
 }
 function fmtMoney(n: number) { return `$${n.toFixed(2)}` }
 
+// Distribute a total evenly across n nights, in whole cents, so the rows sum exactly.
+function evenSplit(total: number, n: number): number[] {
+  if (n <= 0) return []
+  const base = Math.floor((total / n) * 100) / 100
+  const arr = Array(n).fill(base)
+  const remainderCents = Math.round((total - base * n) * 100)
+  for (let i = 0; i < remainderCents && i < n; i++) arr[i] = Math.round((arr[i] + 0.01) * 100) / 100
+  return arr
+}
+
 const RATE_LABEL: Record<string, string> = {
   regular:  'Regular',
   extended: 'Extended stay',
@@ -43,6 +53,7 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
   const [res,      setRes]      = useState<ResData | null>(null)
   const [dogs,     setDogs]     = useState<DogData[]>([])
   const [rates,    setRates]    = useState<RateTable | null>(null)
+  const [paidSum,  setPaidSum]  = useState(0)
   const [loading,  setLoading]  = useState(true)
   const [err,      setErr]      = useState('')
 
@@ -56,7 +67,7 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
 
   useEffect(() => {
     async function load() {
-      const [resR, rdR, ratesR] = await Promise.all([
+      const [resR, rdR, ratesR, paysR] = await Promise.all([
         supabase.from('reservations')
           .select('service_type, dropoff_date, pickup_date, payment_method, total_price, price_overridden, paid')
           .eq('id', reservationId).single(),
@@ -64,9 +75,11 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
           .select('dog_id, dogs(id, name, birthdate)')
           .eq('reservation_id', reservationId),
         supabase.rpc('get_pricing_rates'),
+        supabase.from('reservation_payments').select('amount').eq('reservation_id', reservationId),
       ])
       if (resR.error || !resR.data) { setErr('Could not load booking.'); setLoading(false); return }
       setRes(resR.data as ResData)
+      setPaidSum((paysR.data ?? []).reduce((sum, p) => sum + Number(p.amount), 0))
       const dogList: DogData[] = []
       for (const row of rdR.data ?? []) {
         const d = Array.isArray(row.dogs) ? row.dogs[0] : row.dogs
@@ -102,6 +115,18 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
 
   const engineTotal = breakdown.reduce((s, p) => s + p.subtotal, 0)
   const storedTotal = res ? Number(res.total_price) : 0
+  const isOverride  = !!res?.price_overridden
+
+  // When overridden, show the stored total spread evenly across the nights/days.
+  const overrideSplit = React.useMemo(
+    () => (isOverride ? evenSplit(storedTotal, breakdown.length) : []),
+    [isOverride, storedTotal, breakdown.length],
+  )
+
+  const balance   = Math.max(0, storedTotal - paidSum)
+  const payStatus = storedTotal > 0 && paidSum >= storedTotal ? 'paid' : paidSum > 0 ? 'partial' : 'unpaid'
+  const payColor  = payStatus === 'paid' ? '#15803d' : payStatus === 'partial' ? '#b45309' : '#b45309'
+  const payLabel  = payStatus === 'paid' ? '✅ Paid' : payStatus === 'partial' ? '● Partial' : '● Unpaid'
 
   const serviceLabel = res?.service_type === 'boarding' ? 'Boarding' : 'Daycare'
   const dateRange = res
@@ -133,8 +158,8 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
               <div style={s.overrideBanner}>
                 <span style={s.overrideIcon}>✎</span>
                 <span>
-                  Price was <strong>manually overridden</strong> to <strong>{fmtMoney(storedTotal)}</strong>.
-                  The table below shows the engine&apos;s calculated breakdown for reference.
+                  Price was <strong>manually overridden</strong> to <strong>{fmtMoney(storedTotal)}</strong>,
+                  shown below as an even nightly rate. The engine&apos;s estimate was {fmtMoney(engineTotal)}.
                 </span>
               </div>
             )}
@@ -156,9 +181,13 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
                       <tr key={i} style={{ background: i % 2 === 0 ? '#fafaf9' : '#fff' }}>
                         <td style={s.td}>{fmtDate(period.date)}</td>
                         <td style={s.td}>
-                          <span style={{ ...s.rateTag, color: RATE_COLOR[period.type] }}>
-                            {RATE_LABEL[period.type] ?? period.type}
-                          </span>
+                          {isOverride ? (
+                            <span style={{ ...s.rateTag, color: '#92400e' }}>Manual Override</span>
+                          ) : (
+                            <span style={{ ...s.rateTag, color: RATE_COLOR[period.type] }}>
+                              {RATE_LABEL[period.type] ?? period.type}
+                            </span>
+                          )}
                         </td>
                         <td style={s.td}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -167,15 +196,15 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
                               return (
                                 <span key={di} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                                   {dog?.name ?? 'Dog'}{di === 0 ? ' (1st)' : ' (extra)'}
-                                  {d.puppy_surcharge > 0 && <span style={s.puppySurcharge}> +puppy</span>}
-                                  <span style={s.rateAmt}> {fmtMoney(d.subtotal)}</span>
+                                  {!isOverride && d.puppy_surcharge > 0 && <span style={s.puppySurcharge}> +puppy</span>}
+                                  {!isOverride && <span style={s.rateAmt}> {fmtMoney(d.subtotal)}</span>}
                                 </span>
                               )
                             })}
                           </div>
                         </td>
                         <td style={{ ...s.td, textAlign: 'right', fontWeight: 700 }}>
-                          {fmtMoney(period.subtotal)}
+                          {fmtMoney(isOverride ? (overrideSplit[i] ?? 0) : period.subtotal)}
                         </td>
                       </tr>
                     ))}
@@ -205,20 +234,19 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
                   <span style={{ ...s.summaryValue, fontWeight: 800, color: 'var(--text-primary)' }}>{fmtMoney(storedTotal)}</span>
                 </div>
               )}
-              {/* Payment status */}
+              {/* Payment ledger */}
               <div style={{ ...s.summaryRow, marginTop: 4 }}>
-                <span style={s.summaryLabel}>Payment</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: res?.paid ? '#15803d' : '#b45309' }}>
-                  {res?.paid ? '✅ Paid' : '● Unpaid'}
-                </span>
+                <span style={s.summaryLabel}>Paid</span>
+                <span style={s.summaryValue}>{fmtMoney(paidSum)}</span>
               </div>
-            </div>
-
-            {/* Batch 12 placeholder */}
-            <div style={s.placeholder}>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-                Partial payment tracking coming in Batch 12.
-              </p>
+              <div style={s.summaryRow}>
+                <span style={{ ...s.summaryLabel, fontWeight: 700 }}>Balance due</span>
+                <span style={{ ...s.summaryValue, fontWeight: 800, color: balance > 0 ? '#b45309' : '#15803d' }}>{fmtMoney(balance)}</span>
+              </div>
+              <div style={s.summaryRow}>
+                <span style={s.summaryLabel}>Status</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: payColor }}>{payLabel}</span>
+              </div>
             </div>
           </>
         )}

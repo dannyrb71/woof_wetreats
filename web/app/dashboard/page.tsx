@@ -13,6 +13,7 @@ import { parseAnnouncement } from '@/components/staff/AnnouncementEditor'
 import { ManageUsers } from '@/components/profile/ManageUsers'
 import { formatPhone } from '@/lib/format'
 import { ServicePill } from '@/components/shared/molecules/ServicePill'
+import { FeeBreakdownModal } from '@/components/staff/FeeBreakdownModal'
 import { StatusBadge, type StatusType } from '@/components/shared/molecules/StatusBadge'
 import { AddDogButton } from '@/components/shared/molecules/AddDogButton'
 
@@ -38,6 +39,9 @@ interface ClientProfile {
   auth_id:                 string | null
   secondary_auth_id:       string | null
   secondary_invite_email:  string | null
+  secondary_first_name:    string
+  secondary_last_name:     string
+  secondary_phone:         string
 }
 
 interface MeetGreetRecord {
@@ -118,25 +122,53 @@ function ProfileRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ProfileSection({ profile, onSaved }: {
+function ProfileSection({ profile, isSecondary, authEmail, onSaved }: {
   profile: ClientProfile
+  isSecondary: boolean
+  authEmail: string
   onSaved: (updated: ClientProfile) => void
 }) {
+  // The signed-in person's own name/phone (co-owner uses their secondary_* fields).
+  const me = {
+    first_name: (isSecondary ? profile.secondary_first_name : profile.first_name) || '',
+    last_name:  (isSecondary ? profile.secondary_last_name  : profile.last_name)  || '',
+    phone:      (isSecondary ? profile.secondary_phone      : profile.phone)      || '',
+  }
+
   const [editing,  setEditing]  = useState(false)
   const [draft,    setDraft]    = useState(profile)
   const [saving,   setSaving]   = useState(false)
   const [err,      setErr]      = useState('')
 
-  function startEdit() { setDraft({ ...profile }); setErr(''); setEditing(true) }
+  // Seed the edit form with the signed-in person's own name/phone + shared fields.
+  function startEdit() { setDraft({ ...profile, first_name: me.first_name, last_name: me.last_name, phone: me.phone }); setErr(''); setEditing(true) }
   function set(field: keyof ClientProfile, value: string) { setDraft(prev => ({ ...prev, [field]: value })) }
 
   async function save() {
     setSaving(true); setErr('')
-    const resp = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) })
+    // Send only editable fields; the API routes name/phone to this user's own columns.
+    const payload = {
+      first_name: draft.first_name, last_name: draft.last_name, phone: draft.phone,
+      address: draft.address,
+      emergency_contact_name: draft.emergency_contact_name, emergency_contact_phone: draft.emergency_contact_phone,
+      vet_name: draft.vet_name, vet_phone: draft.vet_phone, vet_address: draft.vet_address,
+    }
+    const resp = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     let json: Record<string, unknown> = {}
     try { json = await resp.json() } catch { /* empty */ }
     if (!resp.ok) { setErr((json.error as string) ?? 'Save failed — try again.'); setSaving(false); return }
-    onSaved(draft); setEditing(false); setSaving(false)
+    // Reflect locally into the correct columns for this user.
+    const updated: ClientProfile = {
+      ...profile,
+      address: draft.address,
+      emergency_contact_name: draft.emergency_contact_name,
+      emergency_contact_phone: draft.emergency_contact_phone,
+      vet_name: draft.vet_name, vet_phone: draft.vet_phone, vet_address: draft.vet_address,
+      ...(isSecondary
+        ? { secondary_first_name: draft.first_name, secondary_last_name: draft.last_name, secondary_phone: draft.phone }
+        : { first_name: draft.first_name, last_name: draft.last_name, phone: draft.phone }),
+    }
+    onSaved(updated); setEditing(false); setSaving(false)
   }
 
   const shown = editing ? draft : profile
@@ -198,9 +230,10 @@ function ProfileSection({ profile, onSaved }: {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
             <div style={s.profileReadGrid}>
-              <ProfileRow label="Phone"   value={formatPhone(shown.phone)} />
-              <ProfileRow label="Email"   value={shown.email} />
-              <ProfileRow label="Address" value={shown.address} />
+              <div style={{ gridColumn: '1 / -1' }}><ProfileRow label="Name" value={`${me.first_name} ${me.last_name}`.trim()} /></div>
+              <ProfileRow label="Phone"   value={formatPhone(me.phone)} />
+              <ProfileRow label="Email"   value={authEmail} />
+              <ProfileRow label="Address" value={profile.address} />
             </div>
             <div>
               <p style={s.profileGroupLabel}>Emergency contact</p>
@@ -236,7 +269,7 @@ function CareNotesSection({ profile, onSaved }: {
   async function save() {
     setSaving(true); setErr('')
     const updated = { ...profile, care_notes: draft }
-    const resp = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) })
+    const resp = await fetch('/api/profile/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ care_notes: draft }) })
     let json: Record<string, unknown> = {}
     try { json = await resp.json() } catch { /* empty */ }
     if (!resp.ok) { setErr((json.error as string) ?? 'Save failed — try again.'); setSaving(false); return }
@@ -376,6 +409,7 @@ function ReservationCard({ res, onCancel }: { res: Reservation; onCancel: (id: s
   const borderColor = resStrokeColor(res.status, res.service_type)
   const nights      = isBoarding ? nightsBetween(res.dropoff_date, res.pickup_date) : null
   const [confirming, setConfirming] = useState(false)
+  const [showBreakdown, setShowBreakdown] = useState(false)
 
   return (
     <div style={{ ...s.resCard, borderLeftColor: borderColor }}>
@@ -387,8 +421,12 @@ function ReservationCard({ res, onCancel }: { res: Reservation; onCancel: (id: s
             <StatusBadge status={res.paid ? 'paid' : 'unpaid'} />
           )}
         </div>
-        <span style={s.resPrice}>${Number(res.total_price).toFixed(2)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" onClick={() => setShowBreakdown(true)} className="btn btn-icon" title="View fee breakdown" aria-label="View fee breakdown" style={{ fontSize: 15, color: 'var(--text-secondary)' }}>ⓘ</button>
+          <span style={s.resPrice}>${Number(res.total_price).toFixed(2)}</span>
+        </div>
       </div>
+      {showBreakdown && <FeeBreakdownModal reservationId={res.id} onClose={() => setShowBreakdown(false)} />}
       <p style={s.resDogs}>{res.dogs.join(', ') || '—'}</p>
       <div style={s.resDates}>
         <div>
@@ -584,6 +622,7 @@ export default function DashboardPage() {
   const [profile,       setProfile]       = useState<ClientProfile | null>(null)
   const [clientId,      setClientId]      = useState('')
   const [authUid,       setAuthUid]       = useState('')
+  const [authEmail,     setAuthEmail]     = useState('')
   const [dogs,          setDogs]          = useState<SharedDog[]>([])
   const [reservations,  setReservations]  = useState<Reservation[]>([])
   const [loading,       setLoading]       = useState(true)
@@ -637,7 +676,7 @@ export default function DashboardPage() {
 
       const [profileRes, dogsRes, resRes] = await Promise.all([
         supabase.from('clients_client_view')
-          .select('id, auth_id, secondary_auth_id, secondary_invite_email, first_name, last_name, phone, email, address, emergency_contact_name, emergency_contact_phone, vet_name, vet_phone, vet_address, care_notes, meet_greet_status')
+          .select('id, auth_id, secondary_auth_id, secondary_invite_email, secondary_first_name, secondary_last_name, secondary_phone, first_name, last_name, phone, email, address, emergency_contact_name, emergency_contact_phone, vet_name, vet_phone, vet_address, care_notes, meet_greet_status')
           .single(),
         supabase.from('dogs').select('id, name, birthdate, photo_url, gender').eq('active', true).order('name'),
         supabase.from('reservations')
@@ -668,7 +707,11 @@ export default function DashboardPage() {
         auth_id:                 p?.auth_id                 ?? null,
         secondary_auth_id:       p?.secondary_auth_id       ?? null,
         secondary_invite_email:  p?.secondary_invite_email  ?? null,
+        secondary_first_name:    p?.secondary_first_name    ?? '',
+        secondary_last_name:     p?.secondary_last_name     ?? '',
+        secondary_phone:         p?.secondary_phone         ?? '',
       })
+      setAuthEmail(session.user.email ?? '')
 
       const status = p?.meet_greet_status ?? 'needed'
       setMgStatus(status)
@@ -757,7 +800,13 @@ export default function DashboardPage() {
     await supabase.from('notifications').update({ read: true }).eq('id', id)
   }
 
-  const firstName = profile?.first_name || 'there'
+  // Identify the signed-in person (primary vs co-owner) so the greeting and
+  // Your Profile reflect *them*, not the shared household's primary.
+  const isSecondary = !!authUid && !!profile && profile.secondary_auth_id === authUid
+  const myFirstName = (isSecondary ? profile?.secondary_first_name : profile?.first_name) || ''
+  const salutation = myFirstName
+    ? `${greeting()}, ${myFirstName}! 👋`
+    : isSecondary ? `${greeting()}, User 2! 👋` : `${greeting()}! 👋`
   const { active, past } = sortReservations(reservations)
 
   if (loading) return <div style={s.center}><p style={{ color: 'var(--text-secondary)' }}>Loading…</p></div>
@@ -779,7 +828,7 @@ export default function DashboardPage() {
 
         {/* ── Page header ── */}
         <div style={s.pageHeader}>
-          <h2 style={s.greeting}>{greeting()}, {firstName}! 👋</h2>
+          <h2 style={s.greeting}>{salutation}</h2>
         </div>
 
         {/* ── 1/3 + 2/3 two-column layout ── */}
@@ -814,7 +863,7 @@ export default function DashboardPage() {
             <BalanceSection reservations={reservations} />
 
             {/* Profile */}
-            {profile && <ProfileSection profile={profile} onSaved={updated => setProfile(updated)} />}
+            {profile && <ProfileSection profile={profile} isSecondary={isSecondary} authEmail={authEmail} onSaved={updated => setProfile(updated)} />}
 
             {/* Manage Users (co-owners) */}
             {profile && clientId && (
@@ -826,6 +875,7 @@ export default function DashboardPage() {
                 primaryEmail={profile.email}
                 secondaryAuthId={profile.secondary_auth_id}
                 secondaryEmail={profile.secondary_invite_email}
+                secondaryName={`${profile.secondary_first_name} ${profile.secondary_last_name}`.trim()}
                 onChanged={refreshHousehold}
               />
             )}

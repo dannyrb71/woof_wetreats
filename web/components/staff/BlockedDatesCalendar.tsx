@@ -24,6 +24,21 @@ function fmtLong(ymd: string): string {
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const DOW_LABELS  = ['Su','Mo','Tu','We','Th','Fr','Sa']
 
+// Availability-calendar-only day shading by how many bookings occupy that day
+// (Rover included). Purely informational so staff don't block committed dates.
+//   1–3 bookings → thick diagonal light-gray stripes
+//   4–8 bookings → diagonal light-orange stripes (approaching capacity)
+//   9+  bookings → solid light-orange (full)
+const STRIPE_GRAY   = 'repeating-linear-gradient(45deg, #d1d5db 0, #d1d5db 6px, #ffffff 6px, #ffffff 12px)'
+const STRIPE_ORANGE = 'repeating-linear-gradient(45deg, #fed7aa 0, #fed7aa 6px, #ffffff 6px, #ffffff 12px)'
+const SOLID_ORANGE  = '#fed7aa'
+function bookingBg(count: number): React.CSSProperties {
+  if (count >= 9) return { background: SOLID_ORANGE }
+  if (count >= 4) return { background: STRIPE_ORANGE }
+  if (count >= 1) return { background: STRIPE_GRAY }
+  return {}
+}
+
 function groupConsecutive(list: BlockedDate[]): BlockedGroup[] {
   if (list.length === 0) return []
   const groups: BlockedGroup[] = []
@@ -62,6 +77,7 @@ export function BlockedDatesCalendar({ stacked }: { stacked?: boolean }) {
   const seed = new Date()
 
   const [blocked,   setBlocked]   = useState<Map<string, BlockedDate>>(new Map())
+  const [counts,    setCounts]    = useState<Map<string, number>>(new Map())
   const [viewYear,  setYear]      = useState(seed.getFullYear())
   const [viewMonth, setMonth]     = useState(seed.getMonth())
   const [loading,   setLoading]   = useState(true)
@@ -69,11 +85,33 @@ export function BlockedDatesCalendar({ stacked }: { stacked?: boolean }) {
   const [err,       setErr]       = useState('')
 
   async function load() {
-    const { data, error } = await supabase.from('blocked_dates').select('id, date, reason').order('date')
-    if (error) { setErr('Could not load blocked dates.'); setLoading(false); return }
+    const [bdR, resR] = await Promise.all([
+      supabase.from('blocked_dates').select('id, date, reason').order('date'),
+      // Non-cancelled bookings (Rover included) → per-day occupancy shading.
+      supabase.from('reservations').select('service_type, dropoff_date, pickup_date').neq('status', 'cancelled'),
+    ])
+    if (bdR.error) { setErr('Could not load blocked dates.'); setLoading(false); return }
     const map = new Map<string, BlockedDate>()
-    for (const r of data ?? []) map.set(r.date, r as BlockedDate)
+    for (const r of bdR.data ?? []) map.set(r.date, r as BlockedDate)
     setBlocked(map)
+
+    // Count how many bookings occupy each date (boarding spans dropoff→pickup
+    // inclusive; daycare is a single day).
+    const cmap = new Map<string, number>()
+    for (const r of resR.data ?? []) {
+      const start = r.dropoff_date as string
+      const end   = (r.service_type === 'boarding' ? r.pickup_date : r.dropoff_date) as string
+      if (!start || !end) continue
+      const d = new Date(start + 'T00:00:00')
+      const endD = new Date(end + 'T00:00:00')
+      let guard = 0
+      while (d <= endD && guard < 400) {
+        const key = toYMD(d)
+        cmap.set(key, (cmap.get(key) ?? 0) + 1)
+        d.setDate(d.getDate() + 1); guard++
+      }
+    }
+    setCounts(cmap)
     setLoading(false)
   }
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -128,7 +166,7 @@ export function BlockedDatesCalendar({ stacked }: { stacked?: boolean }) {
 
   return (
     <div>
-      <p style={s.hint}>Click a date to block or unblock it. Blocked days are greyed out for clients on the booking calendar and rejected on submission.</p>
+      <p style={s.hint}>Click a date to block or unblock it. Blocked days are greyed out for clients on the booking calendar and rejected on submission. Shaded days already have bookings (Rover included) — a heads-up so you don&apos;t block dates you&apos;ve committed to.</p>
 
       <div style={stacked ? { display: 'flex', flexDirection: 'column', gap: 20 } : s.layout}>
         {/* Calendar */}
@@ -144,9 +182,11 @@ export function BlockedDatesCalendar({ stacked }: { stacked?: boolean }) {
             {days.map(date => {
               const isPast    = date < todayStr
               const isBlocked = blocked.has(date)
+              const count     = counts.get(date) ?? 0
               const dayNum    = parseInt(date.slice(8), 10)
               const cellStyle: React.CSSProperties = {
                 ...s.dayCell,
+                ...(count > 0 && !isPast && !isBlocked ? bookingBg(count) : {}),
                 ...(isPast ? s.past : {}),
                 ...(isBlocked ? s.blocked : {}),
                 cursor: isPast ? 'not-allowed' : 'pointer',
@@ -154,7 +194,9 @@ export function BlockedDatesCalendar({ stacked }: { stacked?: boolean }) {
               }
               return (
                 <div key={date} style={cellStyle} onClick={() => !isPast && toggleDate(date)}
-                  title={isBlocked ? 'Blocked — click to unblock' : isPast ? '' : 'Click to block'}>
+                  title={isBlocked ? 'Blocked — click to unblock'
+                    : count > 0 ? `${count} booking${count !== 1 ? 's' : ''} this day — click to block anyway`
+                    : isPast ? '' : 'Click to block'}>
                   {isBlocked ? <span style={s.blockedNum}>{dayNum}</span> : dayNum}
                 </div>
               )
@@ -162,7 +204,10 @@ export function BlockedDatesCalendar({ stacked }: { stacked?: boolean }) {
           </div>
           <div style={s.legend}>
             <span style={s.legendItem}><span style={{ ...s.legendDot, background: '#fecaca' }} />Blocked</span>
-            <span style={s.legendItem}><span style={{ ...s.legendDot, background: '#fff', border: '1px solid #e5e7eb' }} />Available</span>
+            <span style={s.legendItem}><span style={{ ...s.legendDot, background: STRIPE_GRAY }} />1–3</span>
+            <span style={s.legendItem}><span style={{ ...s.legendDot, background: STRIPE_ORANGE }} />4–8</span>
+            <span style={s.legendItem}><span style={{ ...s.legendDot, background: SOLID_ORANGE }} />9+</span>
+            <span style={s.legendItem}><span style={{ ...s.legendDot, background: '#fff', border: '1px solid #e5e7eb' }} />Open</span>
           </div>
           {err && <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444' }}>{err}</p>}
         </div>
@@ -210,7 +255,7 @@ const s: Record<string, React.CSSProperties> = {
   past:       { color: '#d1d5db' },
   blocked:    { background: '#fee2e2', color: '#b91c1c' },
   blockedNum: { fontWeight: 700 },
-  legend:     { display: 'flex', gap: 12, marginTop: 10, paddingTop: 8, borderTop: '1px solid #f3f4f6' },
+  legend:     { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, paddingTop: 8, borderTop: '1px solid #f3f4f6' },
   legendItem: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b7280' },
   legendDot:  { width: 10, height: 10, borderRadius: 3, display: 'inline-block', flexShrink: 0 },
   listCol:    { flex: 1, minWidth: 260 },

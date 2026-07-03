@@ -79,12 +79,19 @@ function ReservationRow({ res, color, dogs, blocked, rates, amountPaid, onChange
             <StatusBadge status={payStatus} />
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button type="button" onClick={() => setShowBreakdown(true)} className="btn btn-icon" title="View fee breakdown" aria-label="View fee breakdown" style={{ fontSize: 16, color: 'var(--text-secondary)' }}>ⓘ</button>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-            <span style={s.price}>${Number(res.total_price).toFixed(2)}</span>
-            {res.price_overridden && <span style={s.overrideBadge}>✎ Overridden</span>}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button type="button" onClick={() => setShowBreakdown(true)} className="btn btn-icon" title="View fee breakdown" aria-label="View fee breakdown" style={{ fontSize: 15, color: 'var(--text-secondary)' }}>ⓘ</button>
+            <span style={s.totalLabel}>Booking total:</span>
+            <span style={s.price}>${total.toFixed(2)}</span>
           </div>
+          {res.price_overridden && <span style={s.overrideBadge}>✎ Overridden</span>}
+          {res.status !== 'cancelled' && (
+            <>
+              <span style={s.payLine}>Paid: <b style={{ color: 'var(--text-primary)' }}>${amountPaid.toFixed(2)}</b></span>
+              <span style={s.payLine}>Amount due: <b style={{ color: total - amountPaid > 0 ? '#b45309' : '#15803d' }}>${Math.max(0, total - amountPaid).toFixed(2)}</b></span>
+            </>
+          )}
         </div>
       </div>
       {showBreakdown && (
@@ -461,8 +468,13 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
       `$${unpaidTotal.toFixed(2)} on your account whenever you get a chance. ` +
       `Venmo can go to ${VENMO_USERNAME}, or cash works too. ` +
       `If anything looks off or you've already paid, just let us know and we'll happily sort it out. Thank you! 🐾`
-    const { error } = await supabase.from('notifications').insert({ client_id: clientId, message, read: false })
-    setReminderState(error ? 'error' : 'sent')
+    // In-app notice (client sees it on their dashboard) — best-effort.
+    await supabase.from('notifications').insert({ client_id: clientId, message, read: false })
+    // Branded email via Resend (send-payment-reminder edge function).
+    const { error: fnErr } = await supabase.functions.invoke('send-payment-reminder', {
+      body: { client_id: clientId, message },
+    })
+    setReminderState(fnErr ? 'error' : 'sent')
   }
 
   const load = useCallback(async () => {
@@ -516,12 +528,17 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
         <div style={s.balanceBar}>
           <span style={s.balanceText}>Outstanding balance: <b>${unpaidTotal.toFixed(2)}</b></span>
           {reminderState === 'sent'
-            ? <span style={s.reminderSent}>✓ Reminder sent</span>
+            ? <span style={s.reminderSent}>✓ Reminder emailed</span>
             : reminderState === 'error'
-              ? <span style={{ fontSize: 12, color: 'var(--error)' }}>Could not send — try again.</span>
-              : <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
-                  Send payment reminder — coming soon
-                </span>}
+              ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: 'var(--error)' }}>Couldn&apos;t send</span>
+                  <button type="button" onClick={sendReminder} className="btn btn-outlined btn-xs">Try again</button>
+                </span>
+              )
+              : <button type="button" onClick={sendReminder} disabled={reminderState === 'sending'} className="btn btn-outlined btn-xs">
+                  {reminderState === 'sending' ? 'Sending…' : '✉ Send payment reminder'}
+                </button>}
         </div>
       )}
 
@@ -550,6 +567,8 @@ const s: Record<string, React.CSSProperties> = {
   svcBadge:     { fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: 'none' },
   statusPill:   { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10 },
   price:        { fontSize: 17, fontWeight: 800, color: '#111827' },
+  totalLabel:   { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' },
+  payLine:      { fontSize: 12, color: 'var(--text-secondary)' },
   dogs:         { margin: '0 0 8px', fontSize: 14, fontWeight: 600, color: '#111827' },
   dates:        { display: 'flex', flexDirection: 'column', gap: 3, fontSize: 13, color: '#374151' },
   dlabel:       { color: '#9ca3af', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', marginRight: 6 },

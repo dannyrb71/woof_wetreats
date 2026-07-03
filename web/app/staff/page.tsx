@@ -21,6 +21,35 @@ function matchesFilter(h: Household, f: FilterKey): boolean {
   }
 }
 
+type LetterRange = { key: string; label: string; start: string; end: string }
+const RANGES: LetterRange[] = [
+  { key: 'A-D', label: 'A–D', start: 'A', end: 'D' },
+  { key: 'E-L', label: 'E–L', start: 'E', end: 'L' },
+  { key: 'M-R', label: 'M–R', start: 'M', end: 'R' },
+  { key: 'S-Z', label: 'S–Z', start: 'S', end: 'Z' },
+]
+
+function firstLetter(name: string): string {
+  return (name.trim().charAt(0) || '').toUpperCase()
+}
+// The card's representative letter = first letter of its alphabetically-first dog
+// name (falls back to the owner name) — the same key that orders "See All".
+function cardLetter(h: Household): string {
+  const names = h.dogs.map(d => d.name).filter(Boolean).sort((x, y) => x.localeCompare(y))
+  return firstLetter(names[0] ?? h.full_name)
+}
+// A household belongs to exactly one range — the one its representative letter falls in.
+function householdInRange(h: Household, r: LetterRange): boolean {
+  const c = cardLetter(h)
+  return c >= r.start && c <= r.end
+}
+// Does a household pass the current text-search query?
+function matchesSearch(h: Household, q: string): boolean {
+  if (!q) return true
+  if (h.full_name.toLowerCase().includes(q)) return true
+  return h.dogs.some(d => d.name.toLowerCase().includes(q))
+}
+
 export default function StaffPage() {
   const router   = useRouter()
   const supabase = createClient()
@@ -30,6 +59,7 @@ export default function StaffPage() {
   const [error,      setError]      = useState('')
   const [filter,     setFilter]     = useState<FilterKey>('all')
   const [search,     setSearch]     = useState('')
+  const [range,      setRange]      = useState<string | null>(null) // null = "See All"
   const [selected,   setSelected]   = useState<Household | null>(null)
 
   useEffect(() => {
@@ -82,20 +112,35 @@ export default function StaffPage() {
     return (names[0] ?? h.full_name).toLowerCase()
   }
 
-  // Visible cards: pill filter, then search narrows WITHIN it, then alphabetical
-  // by the household's first dog's name (no separate sort control).
+  // Which ranges have at least one dog, given the CURRENT pill + search (but
+  // ignoring the range selection itself). Empty ranges are greyed out, so a lit
+  // range always returns results.
+  const availableRanges = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const set = new Set<string>()
+    for (const h of households) {
+      if (!matchesFilter(h, filter) || !matchesSearch(h, q)) continue
+      for (const r of RANGES) if (householdInRange(h, r)) set.add(r.key)
+    }
+    return set
+  }, [households, filter, search])
+
+  // If the active range is no longer reachable (pill/search changed), reset to All.
+  useEffect(() => {
+    if (range && !availableRanges.has(range)) setRange(null)
+  }, [availableRanges, range])
+
+  // Visible cards: pill filter, then range, then search narrows WITHIN it, then
+  // alphabetical by the household's first dog's name (no separate sort control).
   const sorted = useMemo(() => {
     const q = search.trim().toLowerCase()
+    const activeRange = range ? RANGES.find(r => r.key === range) : null
     return households
       .filter(h => matchesFilter(h, filter))
-      .filter(h => {
-        if (!q) return true
-        if (h.full_name.toLowerCase().includes(q)) return true
-        // Match ANY dog's name → the whole household card surfaces.
-        return h.dogs.some(d => d.name.toLowerCase().includes(q))
-      })
+      .filter(h => (activeRange ? householdInRange(h, activeRange) : true))
+      .filter(h => matchesSearch(h, q))
       .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
-  }, [households, filter, search])
+  }, [households, filter, range, search])
 
   // Legend/summary counts across ALL households (not the filtered view).
   const counts = useMemo(() => {
@@ -183,10 +228,45 @@ export default function StaffPage() {
           })}
         </div>
 
+        {/* ── Range picker (by dog name; greyed = no dogs in current view) ── */}
+        <div style={s.rangeRow}>
+          {RANGES.map(r => {
+            const enabled = availableRanges.has(r.key)
+            const active  = range === r.key
+            return (
+              <button
+                key={r.key}
+                type="button"
+                disabled={!enabled}
+                onClick={() => setRange(active ? null : r.key)}
+                aria-pressed={active}
+                aria-label={`Filter by dogs starting ${r.label}`}
+                style={{
+                  ...s.rangeBtn,
+                  ...(active ? s.rangeBtnActive : {}),
+                  ...(!enabled ? s.rangeBtnDisabled : {}),
+                }}
+              >
+                {r.label}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            onClick={() => setRange(null)}
+            aria-pressed={range === null}
+            style={{ ...s.rangeBtn, ...(range === null ? s.rangeBtnActive : {}) }}
+          >
+            See All
+          </button>
+        </div>
+
         {sorted.length === 0 ? (
           <div style={s.empty}>
             <p style={{ color: 'var(--text-secondary)', fontSize: 15 }}>
-              {search.trim() ? `No matches for “${search.trim()}”.` : 'No clients in this group.'}
+              {range
+                ? `No dogs in ${RANGES.find(r => r.key === range)?.label ?? range} in this group.`
+                : search.trim() ? `No matches for “${search.trim()}”.` : 'No clients in this group.'}
             </p>
           </div>
         ) : (
@@ -222,4 +302,9 @@ const s: Record<string, React.CSSProperties> = {
 
   grid:        { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20, alignItems: 'start' },
   empty:       { textAlign: 'center', padding: '80px 24px' },
+
+  rangeRow:      { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
+  rangeBtn:      { padding: '8px 18px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '0.02em', transition: 'background 0.12s, border-color 0.12s, color 0.12s' },
+  rangeBtnActive:{ background: 'var(--primary)', borderColor: 'var(--primary)', color: '#fff' },
+  rangeBtnDisabled:{ color: 'var(--text-secondary)', opacity: 0.35, cursor: 'default', background: 'var(--surface-muted)' },
 }

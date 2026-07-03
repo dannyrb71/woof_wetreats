@@ -21,19 +21,34 @@ export default function SetPasswordPage() {
   useEffect(() => {
     let settled = false
 
-    // The session may arrive slightly after mount as supabase-js parses the
-    // token from the URL hash, so listen as well as check immediately.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session && !settled) { settled = true; setPhase('ready') }
     })
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    async function init() {
+      // Preferred (scanner-safe) flow: the email link carries a token_hash + type
+      // (invite/recovery). We verify it here in client-side JS — so mail scanners
+      // that fetch the link but don't run JS can't consume the one-time token.
+      const params = new URLSearchParams(window.location.search)
+      const token_hash = params.get('token_hash')
+      const type = params.get('type') as 'invite' | 'recovery' | 'email' | 'magiclink' | null
+      if (token_hash && type) {
+        const { error } = await supabase.auth.verifyOtp({ token_hash, type })
+        if (!settled) {
+          settled = true
+          setPhase(error ? 'no_session' : 'ready')
+        }
+        return
+      }
+
+      // Fallback: older links deliver the session via URL hash tokens.
+      const { data: { session } } = await supabase.auth.getSession()
       if (session && !settled) { settled = true; setPhase('ready') }
       else if (!settled) {
-        // Give the hash-parsing listener a brief moment before giving up
         setTimeout(() => { if (!settled) setPhase('no_session') }, 1500)
       }
-    })
+    }
+    init()
 
     return () => sub.subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

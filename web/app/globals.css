@@ -518,6 +518,11 @@ button:disabled {
 }
 .seg-btn.is-active:hover:not(:disabled) { border-color: var(--primary); }
 
+/* Clickable dashboard metric tile — hover lift + tap feedback. */
+.metric-clickable { transition: box-shadow 0.12s ease, transform 0.12s ease, background 0.12s ease; }
+.metric-clickable:hover { box-shadow: 0 3px 14px rgba(0,0,0,0.13); background: var(--surface-muted); }
+.metric-clickable:active { transform: scale(0.985); box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+
 /* ── Interaction states ───────────────────────────────────────── */
 .btn:hover:not(:disabled) { filter: brightness(0.92); }
 .btn:active:not(:disabled) { transform: scale(0.98); filter: brightness(0.88); }

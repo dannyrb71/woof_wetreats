@@ -182,8 +182,8 @@ export default function DashboardPage() {
   // the whole row, so tiles don't repeat "Today"/the date. isToday only tweaks the
   // "Dogs Here" sub-line.
   const isToday = D === todayStr()
-  const metrics = [
-    { label: 'Dogs Here',     value: String(dogsHereNow),       sub: isToday ? 'Updated just now' : 'On this date', link: false },
+  const metrics: { label: string; value: string; sub: string; link: boolean; href?: string }[] = [
+    { label: 'Dogs Here',     value: String(dogsHereNow),       sub: isToday ? 'Updated just now' : 'On this date', link: false, href: '/staff/schedule' },
     { label: 'Arrivals',      value: String(arrivals.length),   sub: `Next: ${fmtTime(nextTime(arrivals.map(r => r.dropoff_time)))}`, link: true },
     { label: 'Departures',    value: String(departures.length), sub: `Next: ${fmtTime(nextTime(departures.map(r => r.pickup_time)))}`, link: true },
     { label: 'Meet & Greets', value: String(mg.length),         sub: `Next: ${fmtTime(nextTime(mg.map(m => m.scheduled_time)))}`, link: true },
@@ -213,16 +213,23 @@ export default function DashboardPage() {
 
         {/* Metric cards */}
         <div style={s.metricRow}>
-          {metrics.map(m => (
-            <div key={m.label} style={s.metricCard}>
-              <span style={s.metricLabel}>{m.label}</span>
-              <span style={s.metricValue}>{loading ? '—' : m.value}</span>
-              <div style={s.metricFoot}>
-                <span style={s.metricSub}>{m.sub}</span>
-                {m.link && <a href="/staff/schedule" style={s.schedLink}>View Schedule →</a>}
-              </div>
-            </div>
-          ))}
+          {metrics.map(m => {
+            const inner = (
+              <>
+                <span style={s.metricLabel}>{m.label}</span>
+                <span style={s.metricValue}>{loading ? '—' : m.value}</span>
+                <div style={s.metricFoot}>
+                  <span style={s.metricSub}>{m.sub}</span>
+                  {m.link && <a href="/staff/schedule" style={s.schedLink}>View Schedule →</a>}
+                </div>
+              </>
+            )
+            return m.href
+              ? <div key={m.label} role="button" tabIndex={0} onClick={() => router.push(m.href!)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); router.push(m.href!) } }}
+                  className="metric-clickable" style={{ ...s.metricCard, cursor: 'pointer' }}>{inner}</div>
+              : <div key={m.label} style={s.metricCard}>{inner}</div>
+          })}
         </div>
 
         {/* 3-column body (collapses to 1 column on tablet/mobile via globals.css) */}

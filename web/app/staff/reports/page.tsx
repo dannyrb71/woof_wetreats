@@ -17,6 +17,7 @@ interface Booking {
   total_price: number; referral_free: boolean; referral_discount: number
   payment_method: string; price_overridden: boolean; dogs_count: number
   is_new_client: boolean; client_created_at: string; meet_greet_status: string; is_manual: boolean
+  client_first_name: string | null; client_last_name: string | null
 }
 interface Payment { reservation_id: string; amount: number; paid_on: string; method: string; service_type: string; client_id: string }
 
@@ -201,8 +202,11 @@ export default function ReportsPage() {
     { name: 'Returning', value: new Set(rangeBks.filter(b => !b.is_new_client).map(b => b.client_id)).size },
   ].filter(x => x.value > 0)
   const topClients = useMemo(() => {
-    const m: Record<string, { total: number; count: number }> = {}
-    for (const b of rangeBks) { (m[b.client_id] ??= { total: 0, count: 0 }); m[b.client_id].total += Number(b.total_price); m[b.client_id].count++ }
+    const m: Record<string, { total: number; count: number; name: string }> = {}
+    for (const b of rangeBks) {
+      const name = `${b.client_first_name ?? ''} ${b.client_last_name ?? ''}`.trim() || `Client ${b.client_id.slice(0, 8)}`
+      ;(m[b.client_id] ??= { total: 0, count: 0, name }); m[b.client_id].total += Number(b.total_price); m[b.client_id].count++
+    }
     return Object.entries(m).map(([id, v]) => ({ id, ...v })).sort((a, b) => b.total - a.total).slice(0, 8)
   }, [rangeBks]) // eslint-disable-line react-hooks/exhaustive-deps
   // Booking cadence: median gap (days) between consecutive bookings per repeat client.
@@ -358,14 +362,14 @@ export default function ReportsPage() {
                       {topClients.map((c, i) => (
                         <div key={c.id} style={s.rankRow}>
                           <span style={s.rankNum}>{i + 1}</span>
-                          <span style={s.rankName}>Client {c.id.slice(0, 8)}</span>
+                          <span style={s.rankName}>{c.name}</span>
                           <span style={s.rankMeta}>{c.count} booking{c.count !== 1 ? 's' : ''}</span>
                           <span style={s.rankTotal}>{money(c.total)}</span>
                         </div>
                       ))}
                     </div>
                   )}
-                  <p style={s.note}>Client labels are anonymized IDs here; we can wire in names next.</p>
+                  <p style={s.note}>Ranked by total booked value in the selected period.</p>
                 </section>
               </div>
             )}

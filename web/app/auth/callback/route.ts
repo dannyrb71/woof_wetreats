@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
       // Route based on staff status + profile completeness (mirrors routeUser)
       const { data: isAdmin } = await supabase.rpc('is_admin')
       if (isAdmin) {
-        return NextResponse.redirect(`${origin}/staff`)
+        return NextResponse.redirect(`${origin}/staff/dashboard`)
       }
       // If this email was pre-authorised as a household co-owner, link it now so
       // the user drops into the shared household instead of onboarding a new one.

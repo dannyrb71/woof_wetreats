@@ -29,7 +29,7 @@ export async function routeUser(
   if (!session) { router.replace('/auth'); return }
 
   const { data: isAdmin } = await supabase.rpc('is_admin')
-  if (isAdmin) { router.replace('/staff'); return }
+  if (isAdmin) { router.replace('/staff/dashboard'); return }
 
   // If this user was invited as a household co-owner, link them now. Safe/idempotent:
   // returns null for users who already have their own client or have no pending invite.

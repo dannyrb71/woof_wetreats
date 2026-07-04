@@ -190,6 +190,9 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   // Co-owner fields for the Manage Users card (staff-side reuse of the client component).
   const [owners,      setOwners]      = useState<{ auth_id: string | null; secondary_auth_id: string | null; secondary_invite_email: string | null; secondary_first_name: string | null; secondary_last_name: string | null } | null>(null)
   const [staffUid,    setStaffUid]    = useState('')
+  // Manual new/returning classification (private, drives the Reports metric).
+  const [isNew,       setIsNew]       = useState(true)
+  const [savingNew,   setSavingNew]   = useState(false)
   const [calRes,      setCalRes]      = useState<CalRes[]>([])
   const [paidMap,     setPaidMap]     = useState<Record<string, number>>({})
   const [calLoading,  setCalLoading]  = useState(true)
@@ -204,10 +207,11 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
         .select('id,service_type,status,dropoff_date,pickup_date,paid,total_price')
         .eq('client_id', household.client_id).order('dropoff_date', { ascending: true }),
       supabase.from('clients')
-        .select('created_at, auth_id, secondary_auth_id, secondary_invite_email, secondary_first_name, secondary_last_name')
+        .select('created_at, auth_id, secondary_auth_id, secondary_invite_email, secondary_first_name, secondary_last_name, is_new_client')
         .eq('id', household.client_id).single(),
     ])
     if (detR.data?.[0]) setDetail(detR.data[0])
+    if (cliR.data) setIsNew(cliR.data.is_new_client ?? true)
     if (cliR.data) setOwners({
       auth_id:                cliR.data.auth_id ?? null,
       secondary_auth_id:      cliR.data.secondary_auth_id ?? null,
@@ -340,6 +344,15 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
     setSaving(false)
     if (error) { setSaveErr('Save failed — try again.'); return }
     setSaved(true)
+  }
+
+  // Flip the private new/returning classification (optimistic; drives Reports).
+  async function setClientNew(next: boolean) {
+    if (savingNew || next === isNew) return
+    setSavingNew(true); setIsNew(next)
+    const { error } = await supabase.from('clients').update({ is_new_client: next }).eq('id', household.client_id)
+    setSavingNew(false)
+    if (error) setIsNew(!next) // revert on failure
   }
 
   // ── Client info editing ────────────────────────────────────
@@ -778,6 +791,20 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
               </div>
               <textarea value={note} onChange={e => { setNote(e.target.value); setSaved(false); setSaveErr('') }}
                 placeholder="Private staff notes…" rows={4} style={s.textarea} />
+
+              {/* New/returning classification — private, powers the Reports metric. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Client status</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {([['new', 'New'], ['returning', 'Returning']] as const).map(([key, label]) => {
+                    const on = (key === 'new') === isNew
+                    return (
+                      <button key={key} type="button" onClick={() => setClientNew(key === 'new')} disabled={savingNew}
+                        className={`seg-btn${on ? ' is-active' : ''}`}>{label}</button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
             {/* RESERVATIONS — sp-reservations */}

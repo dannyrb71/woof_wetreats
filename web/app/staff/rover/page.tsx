@@ -171,9 +171,9 @@ export default function RoverPage() {
   )
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
-      <main style={s.main}>
+      <main className="page-body" style={{ '--page-max': '960px' } as React.CSSProperties}>
         <div className="staff-header-2col" style={s.header}>
           <div className="page-header-text">
             <h2 style={s.title}>Rover</h2>
@@ -531,9 +531,8 @@ function RoverDogCard({ dog, roverId, meetGreets, onChanged }: {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--page-bg)' },
+  // page shell + body come from the layout kit (.page / .page-body)
   center:      { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
-  main:        { maxWidth: 960, margin: '0 auto', padding: '28px 24px 60px' },
   header:      { marginBottom: 24 },
   avatar:      { width: 52, height: 52, borderRadius: '50%', background: '#16a34a', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 800, flexShrink: 0 },
   title:       { margin: 0, fontSize: 22, fontWeight: 800, color: '#111827' },

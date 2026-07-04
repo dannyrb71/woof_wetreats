@@ -38,10 +38,10 @@ export default function StaffSettingsPage() {
   if (!ready) return <div style={s.center}><p style={{ color: '#6b7280' }}>Loading…</p></div>
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
 
-      <main style={s.main}>
+      <main className="page-body" style={{ '--page-max': '920px' } as React.CSSProperties}>
         <h2 style={s.pageTitle}>Settings</h2>
 
         {/* ── Tabs ── */}
@@ -107,7 +107,7 @@ export default function StaffSettingsPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--page-bg)' },
+  // page shell + body come from the layout kit (.page / .page-body)
   center:      { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
   header:      { background: '#fff', borderBottom: '1px solid #e5e7eb', position: 'sticky', top: 0, zIndex: 10 },
   headerInner: { maxWidth: 920, margin: '0 auto', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 },
@@ -116,7 +116,6 @@ const s: Record<string, React.CSSProperties> = {
   appName:     { margin: 0, fontSize: 20, fontWeight: 800, color: '#111827' },
   staffBadge:  { fontSize: 11, fontWeight: 700, background: '#111827', color: '#fff', padding: '3px 9px', borderRadius: 20, letterSpacing: '0.04em' },
   navLink:     { fontSize: 13, color: '#6b7280', textDecoration: 'none', fontWeight: 500 },
-  main:        { maxWidth: 920, margin: '0 auto', padding: '32px 24px 60px' },
   pageTitle:   { margin: '0 0 20px', fontSize: 22, fontWeight: 800, color: '#111827' },
   tabBar:      { display: 'flex', gap: 4, borderBottom: '1px solid #e5e7eb', marginBottom: 24 },
   tab:         { fontSize: 14, fontWeight: 600, color: '#6b7280', background: 'none', border: 'none', borderBottom: '2px solid transparent', padding: '10px 16px', cursor: 'pointer', fontFamily: 'inherit', marginBottom: -1 },

@@ -68,7 +68,7 @@ export default function SetPasswordPage() {
   }
 
   return (
-    <div style={s.page}>
+    <div className="layout-centered" style={{ background: '#fff' }}>
       <div style={s.card}>
         <h1 style={s.title}>🐾 Woof Wetreats</h1>
 
@@ -113,7 +113,7 @@ export default function SetPasswordPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:      { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fff' },
+  // page shell comes from the layout kit (.layout-centered)
   card:      { background: '#fff', borderRadius: 'var(--radius-card)', padding: '40px 36px', width: '100%', maxWidth: 400, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   title:     { margin: '0 0 20px', fontSize: 24, fontWeight: 700, textAlign: 'center' },
   h2:        { margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#111827' },

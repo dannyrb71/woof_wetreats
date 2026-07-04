@@ -19,11 +19,12 @@ export type StatusType =
   | 'partial'
   | 'overridden'
 
-const STATUS: Record<StatusType, { label: string; bg: string; color: string }> = {
+const STATUS: Record<StatusType, { label: string; bg: string; color: string; border?: string }> = {
   upcoming:     { label: 'Upcoming',     bg: 'var(--primary-light)', color: 'var(--primary-dark)' },
   'in-progress':{ label: 'In Progress',  bg: '#E7F1E8',              color: 'var(--success)' },
   completed:    { label: 'Completed',    bg: 'var(--background)',    color: 'var(--text-secondary)' },
-  cancelled:    { label: 'Cancelled',    bg: '#FBECEC',              color: 'var(--error)' },
+  // Cancelled reads as a clearer (but slightly muted) red — text + outline.
+  cancelled:    { label: 'Cancelled',    bg: '#FCEBEA',              color: '#B4241C', border: '1px solid #DE9A93' },
   paid:         { label: '✅ Paid',      bg: '#EEF6EF',              color: 'var(--success)' },
   unpaid:       { label: '● Unpaid',     bg: '#FBF4E9',              color: 'var(--warning)' },
   partial:      { label: 'Partial',      bg: '#FBF4E9',              color: 'var(--warning)' },
@@ -51,7 +52,7 @@ interface Props {
 export function StatusBadge({ status, label, style }: Props) {
   const spec = STATUS[status] ?? STATUS.completed
   return (
-    <span style={{ ...BASE, background: spec.bg, color: spec.color, ...style }}>
+    <span style={{ ...BASE, background: spec.bg, color: spec.color, ...(spec.border ? { border: spec.border } : {}), ...style }}>
       {label ?? spec.label}
     </span>
   )

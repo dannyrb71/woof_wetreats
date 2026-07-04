@@ -1,7 +1,7 @@
 'use client'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase'
-import { calculatePrice, getHolidayDateRange, MaxStayExceededError } from '@/lib/pricing-engine'
+import { calculatePrice, referralDiscount, getHolidayDateRange, MaxStayExceededError } from '@/lib/pricing-engine'
 import type { RateTable, PaymentMethod, ServiceType } from '@/lib/pricing-engine'
 import { VENMO_USERNAME } from '@/lib/payment'
 import DatePicker from '@/components/booking/DatePicker'
@@ -9,7 +9,9 @@ import TimePicker from '@/components/booking/TimePicker'
 import { FeeBreakdownModal } from '@/components/staff/FeeBreakdownModal'
 import { ServicePill } from '@/components/shared/molecules/ServicePill'
 import { StatusBadge, type StatusType } from '@/components/shared/molecules/StatusBadge'
+import { Money } from '@/components/shared/molecules/Money'
 import { PaymentsPanel } from '@/components/staff/PaymentsPanel'
+import { BookingsArchive } from '@/components/profile/BookingsArchive'
 
 // DB status keys (underscore) → StatusBadge molecule keys (hyphen)
 const STATUS_KEY: Record<string, StatusType> = {
@@ -24,7 +26,8 @@ interface Reservation {
   id: string; service_type: 'boarding' | 'daycare'; status: string
   dropoff_date: string; dropoff_time: string; pickup_date: string; pickup_time: string
   payment_method: string; total_price: number; price_overridden: boolean; paid: boolean
-  care_notes: string | null; dogs: string[]; dog_ids: string[]
+  care_notes: string | null; dogs: string[]; dog_ids: string[]; rate_version_id: number | null
+  referral_free: boolean; referral_discount: number
 }
 
 const SVC = { boarding: 'var(--status-boarding)', daycare: 'var(--status-daycare)' }
@@ -83,7 +86,7 @@ function ReservationRow({ res, color, dogs, blocked, rates, amountPaid, onChange
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button type="button" onClick={() => setShowBreakdown(true)} className="btn btn-icon" title="View fee breakdown" aria-label="View fee breakdown" style={{ fontSize: 15, color: 'var(--text-secondary)' }}>ⓘ</button>
             <span style={s.totalLabel}>Booking total:</span>
-            <span style={s.price}>${total.toFixed(2)}</span>
+            <Money value={total} cancelled={res.status === 'cancelled'} style={s.price} />
           </div>
           {res.price_overridden && <span style={s.overrideBadge}>✎ Overridden</span>}
           {res.status !== 'cancelled' && (
@@ -155,7 +158,9 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
   const [payment, setPayment] = useState<PaymentMethod>('cash')
   const [careNotes, setCareNotes] = useState('')
   const [override, setOverride] = useState('')
-  const [price, setPrice] = useState<number | null>(null)
+  const [referralFree, setReferralFree] = useState(false)
+  const [price, setPrice] = useState<number | null>(null)   // gross (before referral)
+  const [refDisc, setRefDisc] = useState(0)                 // potential free-night discount
   const [priceErr, setPriceErr] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState('')
@@ -163,18 +168,22 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
   const chosen = dogs.filter(d => selDogs.has(d.id))
 
   useEffect(() => {
-    setPriceErr(''); setPrice(null)
+    setPriceErr(''); setPrice(null); setRefDisc(0)
     if (!rates || chosen.length === 0 || !dropDate) return
     if (service === 'boarding' && (!pickDate || pickDate <= dropDate)) return
     try {
       // Staff bypass the 14-night self-service cap (same as the staff edit flow)
       const r = calculatePrice({ service_type: service, dropoff_date: dropDate, pickup_date: service === 'daycare' ? dropDate : pickDate!, dogs: chosen, payment_method: payment }, rates, { skipMaxStayCheck: true })
       setPrice(r.total)
+      setRefDisc(referralDiscount(r, rates, payment))
     } catch (e) { if (e instanceof MaxStayExceededError) setPriceErr(e.message) }
   }, [service, dropDate, pickDate, payment, selDogs, rates]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const overrideNum = override.trim() === '' ? null : Number(override)
-  const effectivePrice = (overrideNum !== null && !Number.isNaN(overrideNum) && overrideNum >= 0) ? overrideNum : price
+  const hasOverride = overrideNum !== null && !Number.isNaN(overrideNum) && overrideNum >= 0
+  const discountApplied = !hasOverride && referralFree ? refDisc : 0
+  const netPrice = price != null ? Math.max(0, price - discountApplied) : null
+  const effectivePrice = hasOverride ? overrideNum : netPrice
 
   async function submit() {
     setErr('')
@@ -194,7 +203,8 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
         dropoff_date: dropDate, dropoff_time: dropTime,
         pickup_date: service === 'daycare' ? dropDate : pickDate, pickup_time: pickTime,
         payment_method: payment, dog_ids: [...selDogs], care_notes: careNotes.trim() || null,
-        price_override: (overrideNum !== null && !Number.isNaN(overrideNum) && overrideNum >= 0) ? overrideNum : null,
+        price_override: hasOverride ? overrideNum : null,
+        referral_free: referralFree,
       }),
     })
     const json = await resp.json().catch(() => ({}))
@@ -263,11 +273,21 @@ function NewReservationForm({ clientId, dogs, blocked, rates, meetGreetCompleted
       <div style={s.priceBox}>
         {priceErr ? <span style={{ color: '#ef4444', fontSize: 13 }}>{priceErr}</span> : (
           <>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>Calculated price: <b style={{ color: '#111827' }}>{price != null ? `$${price.toFixed(2)}` : '—'}</b></span>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>{discountApplied > 0 ? 'Fee' : 'Calculated price'}: <b style={{ color: '#111827' }}>{price != null ? `$${price.toFixed(2)}` : '—'}</b></span>
+            <button type="button" onClick={() => setReferralFree(v => !v)} disabled={hasOverride}
+              style={{ ...s.toggleBtn, marginTop: 8, alignSelf: 'flex-start', fontSize: 13,
+                background: referralFree ? 'var(--primary)' : '#fff',
+                color: referralFree ? '#fff' : '#374151',
+                borderColor: referralFree ? 'var(--primary)' : '#e5e7eb',
+                opacity: hasOverride ? 0.5 : 1 }}>
+              {referralFree ? '✓ ' : ''}🎁 Free referral {service === 'daycare' ? '(one free day)' : '(one free night, lowest rate)'}
+            </button>
+            {hasOverride && <span style={{ fontSize: 12, color: '#9ca3af' }}>Remove the override price to apply a free referral.</span>}
+            {discountApplied > 0 && <span style={{ fontSize: 13, color: '#b45309', fontWeight: 600 }}>Referral discount: −${discountApplied.toFixed(2)}</span>}
             <label style={{ ...s.flabel, marginTop: 8 }}>Override price (optional)
               <input type="number" min="0" step="1" value={override} onChange={e => setOverride(e.target.value)} placeholder="leave blank to use calculated" style={s.input} />
             </label>
-            {effectivePrice != null && <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Will charge: ${Number(effectivePrice).toFixed(2)}</span>}
+            {effectivePrice != null && <span style={{ fontSize: 14, color: '#15803d', fontWeight: 700 }}>Total: ${Number(effectivePrice).toFixed(2)}</span>}
           </>
         )}
       </div>
@@ -308,27 +328,46 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
   // staff override, so we visibly preserve it across this edit.
   const [override, setOverride] = useState(res.price_overridden ? String(res.total_price) : '')
   const [reason, setReason]     = useState('')
-  const [price, setPrice]       = useState<number | null>(null)
+  const [referralFree, setReferralFree] = useState(res.referral_free ?? false)
+  const [price, setPrice]       = useState<number | null>(null)   // gross (before referral)
+  const [refDisc, setRefDisc]   = useState(0)                     // potential free-night discount
   const [priceErr, setPriceErr] = useState('')
   const [saving, setSaving]     = useState(false)
   const [err, setErr]           = useState('')
+  // Rates this booking was priced under — the reference calc must match how the
+  // server reprices on save (e.g. when switching payment type), which uses the
+  // booking's pinned version, NOT current rates. Falls back to current rates.
+  const [verRates, setVerRates] = useState<RateTable | null>(null)
+  useEffect(() => {
+    if (res.rate_version_id == null) return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase.rpc('get_rate_version', { p_id: res.rate_version_id })
+      if (!cancelled && data) setVerRates(data as RateTable)
+    })()
+    return () => { cancelled = true }
+  }, [res.rate_version_id, supabase])
+  const calcRates = verRates ?? rates
 
   const chosen = dogs.filter(d => selDogs.has(d.id))
 
   // Live "calculated price" — for staff reference only. Does NOT touch override.
   useEffect(() => {
-    setPriceErr(''); setPrice(null)
-    if (!rates || chosen.length === 0 || !dropDate) return
+    setPriceErr(''); setPrice(null); setRefDisc(0)
+    if (!calcRates || chosen.length === 0 || !dropDate) return
     if (service === 'boarding' && (!pickDate || pickDate <= dropDate)) return
     try {
-      const r = calculatePrice({ service_type: service, dropoff_date: dropDate, pickup_date: service === 'daycare' ? dropDate : pickDate!, dogs: chosen, payment_method: payment }, rates, { skipMaxStayCheck: true })
+      const r = calculatePrice({ service_type: service, dropoff_date: dropDate, pickup_date: service === 'daycare' ? dropDate : pickDate!, dogs: chosen, payment_method: payment }, calcRates, { skipMaxStayCheck: true })
       setPrice(r.total)
+      setRefDisc(referralDiscount(r, calcRates, payment))
     } catch (e) { if (e instanceof MaxStayExceededError) setPriceErr(e.message) }
-  }, [service, dropDate, pickDate, payment, selDogs, rates]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [service, dropDate, pickDate, payment, selDogs, calcRates]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const overrideNum = override.trim() === '' ? null : Number(override)
   const overrideValid = overrideNum !== null && !Number.isNaN(overrideNum) && overrideNum >= 0
-  const effectivePrice = overrideValid ? overrideNum : price
+  const discountApplied = !overrideValid && referralFree ? refDisc : 0
+  const netPrice = price != null ? Math.max(0, price - discountApplied) : null
+  const effectivePrice = overrideValid ? overrideNum : netPrice
   const datesChanged = dropDate !== res.dropoff_date || (service === 'boarding' && pickDate !== res.pickup_date)
 
   async function save() {
@@ -353,6 +392,7 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
         reason: reason.trim() || undefined,
         // null → recalculate (clears any prior override); number → set/keep override
         price_override: overrideValid ? overrideNum : null,
+        referral_free: referralFree,
       }),
     })
     const json = await resp.json().catch(() => ({}))
@@ -418,14 +458,24 @@ function EditReservationForm({ res, dogs, blocked, rates, onSaved, onClose }: {
       <div style={s.priceBox}>
         {priceErr ? <span style={{ color: '#ef4444', fontSize: 13 }}>{priceErr}</span> : (
           <>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>Calculated price: <b style={{ color: '#111827' }}>{price != null ? `$${price.toFixed(2)}` : '—'}</b></span>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>{discountApplied > 0 ? 'Fee' : 'Calculated price'}: <b style={{ color: '#111827' }}>{price != null ? `$${price.toFixed(2)}` : '—'}</b></span>
+            <button type="button" onClick={() => setReferralFree(v => !v)} disabled={overrideValid}
+              style={{ ...s.toggleBtn, marginTop: 8, alignSelf: 'flex-start', fontSize: 13,
+                background: referralFree ? 'var(--primary)' : '#fff',
+                color: referralFree ? '#fff' : '#374151',
+                borderColor: referralFree ? 'var(--primary)' : '#e5e7eb',
+                opacity: overrideValid ? 0.5 : 1 }}>
+              {referralFree ? '✓ ' : ''}🎁 Free referral {service === 'daycare' ? '(one free day)' : '(one free night, lowest rate)'}
+            </button>
+            {overrideValid && <span style={{ fontSize: 12, color: '#9ca3af' }}>Remove the override price to apply a free referral.</span>}
+            {discountApplied > 0 && <span style={{ fontSize: 13, color: '#b45309', fontWeight: 600 }}>Referral discount: −${discountApplied.toFixed(2)}</span>}
             <label style={{ ...s.flabel, marginTop: 8 }}>Override price (optional)
               <input type="number" min="0" step="1" value={override} onChange={e => setOverride(e.target.value)} placeholder="leave blank to use calculated" style={s.input} />
             </label>
             {overrideValid
-              ? <span style={s.overrideTag}>✎ Manual override — won&apos;t be recalculated</span>
+              ? <span style={s.overrideTag}>✎ Manual override — won&apos;t be recalculated{referralFree ? ' (replaces referral discount)' : ''}</span>
               : <span style={{ fontSize: 12, color: '#9ca3af' }}>Blank = system-calculated price.</span>}
-            {effectivePrice != null && <span style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>Will charge: ${Number(effectivePrice).toFixed(2)}</span>}
+            {effectivePrice != null && <span style={{ fontSize: 14, color: '#15803d', fontWeight: 700 }}>Total: ${Number(effectivePrice).toFixed(2)}</span>}
           </>
         )}
       </div>
@@ -449,6 +499,8 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
   const [rates, setRates] = useState<RateTable | null>(null)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [showPast, setShowPast] = useState(false)
+  const [selectedPastId, setSelectedPastId] = useState<string | null>(null)
   const [reminderState, setReminderState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [paidMap, setPaidMap] = useState<Record<string, number>>({})
 
@@ -480,7 +532,7 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
   const load = useCallback(async () => {
     const [resR, bdR, rtR] = await Promise.all([
       supabase.from('reservations')
-        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, price_overridden, paid, care_notes')
+        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, payment_method, total_price, price_overridden, paid, care_notes, rate_version_id, referral_free, referral_discount')
         .eq('client_id', clientId).order('dropoff_date', { ascending: true }),
       supabase.from('blocked_dates').select('date'),
       supabase.rpc('get_pricing_rates'),
@@ -516,6 +568,11 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
   useEffect(() => { load() }, [load])
 
   function afterChange() { load(); onChanged?.() }
+
+  // Active bookings render as full cards; past/cancelled move to the archive modal.
+  const activeRes = reservations.filter(r => r.status === 'upcoming' || r.status === 'in_progress')
+  const pastRes   = reservations.filter(r => r.status === 'completed' || r.status === 'cancelled')
+  const selectedPast = pastRes.find(r => r.id === selectedPastId) ?? null
 
   return (
     <div style={s.section}>
@@ -553,13 +610,49 @@ export function StaffReservations({ clientId, clientFirstName, dogs, meetGreetCo
 
       {loading ? <p style={{ fontSize: 13, color: '#9ca3af' }}>Loading…</p>
         : reservations.length === 0 ? <p style={{ fontSize: 13, color: '#9ca3af' }}>No bookings yet.</p>
-        : reservations.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} dogs={dogs} blocked={blocked} rates={rates} amountPaid={paidMap[r.id] ?? 0} onChanged={afterChange} />)}
+        : (
+          <>
+            {activeRes.length === 0
+              ? <p style={{ fontSize: 13, color: '#9ca3af' }}>No active bookings.</p>
+              : activeRes.map(r => <ReservationRow key={r.id} res={r} color={SVC[r.service_type]} dogs={dogs} blocked={blocked} rates={rates} amountPaid={paidMap[r.id] ?? 0} onChanged={afterChange} />)}
+            {pastRes.length > 0 && (
+              <button type="button" onClick={() => setShowPast(true)} className="btn btn-ghost btn-sm" style={{ marginTop: 4 }}>
+                See all past &amp; cancelled ({pastRes.length})
+              </button>
+            )}
+          </>
+        )}
+
+      {showPast && (
+        <div style={s.overlay} onClick={() => { setShowPast(false); setSelectedPastId(null) }} role="dialog" aria-modal="true">
+          <div style={s.dialog} onClick={e => e.stopPropagation()}>
+            <div style={s.dialogHead}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>Past &amp; Cancelled Bookings</h3>
+              <button type="button" onClick={() => { setShowPast(false); setSelectedPastId(null) }} className="btn btn-ghost btn-sm">Close</button>
+            </div>
+            <div style={s.dialogBody}>
+              {selectedPast ? (
+                <>
+                  <button type="button" onClick={() => setSelectedPastId(null)} className="btn btn-ghost btn-sm" style={{ marginBottom: 10 }}>‹ Back to list</button>
+                  <ReservationRow res={selectedPast} color={SVC[selectedPast.service_type]} dogs={dogs} blocked={blocked} rates={rates} amountPaid={paidMap[selectedPast.id] ?? 0} onChanged={afterChange} />
+                </>
+              ) : (
+                <BookingsArchive bookings={pastRes} onSelect={setSelectedPastId} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 const s: Record<string, React.CSSProperties> = {
   section:      { },
+  overlay:      { position: 'fixed', inset: 0, background: 'rgba(46,42,38,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  dialog:       { background: 'var(--surface)', borderRadius: 'var(--radius-card)', boxShadow: '0 8px 40px rgba(46,42,38,0.22)', width: '100%', maxWidth: 620, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  dialogHead:   { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '18px 22px 14px', borderBottom: '1px solid var(--border)' },
+  dialogBody:   { padding: '16px 22px 22px', overflowY: 'auto' },
   sectionHead:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' },
   sectionTitle: { margin: 0, fontSize: 15, fontWeight: 700, color: '#111827' },
   card:         { background: '#fff', borderRadius: 'var(--radius-card)', border: '1px solid #e5e7eb', borderLeft: '4px solid', padding: '16px 18px', marginBottom: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },

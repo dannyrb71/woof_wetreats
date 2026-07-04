@@ -268,6 +268,23 @@ export function calculatePrice(input: PricingInput, rates: RateTable, options: P
   return { total, total_nights, is_extended, breakdown }
 }
 
+// =============================================================
+// Referral free-night discount
+// One free night valued at the FIRST-DOG effective rate of the cheapest rate
+// type present in the booking (daycare → the daycare rate). Uses the booking's
+// payment method, so Venmo bookings discount the Venmo rate. Puppy surcharge is
+// never part of the free night. Returns 0 when there are no priced periods.
+// =============================================================
+export function referralDiscount(result: PricingResult, rates: RateTable, payment_method: PaymentMethod): number {
+  const typesPresent = new Set<RateType>(result.breakdown.map(p => p.type))
+  let min = Infinity
+  for (const t of typesPresent) {
+    const r = effectiveRate(rates, t, true, payment_method)   // first-dog rate
+    if (r < min) min = r
+  }
+  return Number.isFinite(min) ? min : 0
+}
+
 function priceDaycare(date: string, dogs: DogInput[], payment_method: PaymentMethod, rates: RateTable): PricingResult {
   const dogCosts = dogs.map((dog): DogPeriodCost => {
     const baseRate  = effectiveRate(rates, 'daycare', true, payment_method)  // every dog at the daycare rate

@@ -61,7 +61,7 @@ export default function AuthPage() {
   }
 
   return (
-    <div style={s.page}>
+    <div className="layout-centered" style={{ background: '#fff' }}>
       <div style={s.card}>
         <h1 style={s.title}>🐾 Woof Wetreats</h1>
         <p style={s.subtitle}>Sign in to manage your bookings</p>
@@ -145,7 +145,7 @@ export default function AuthPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:       { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#fff' },
+  // page shell comes from the layout kit (.layout-centered)
   card:       { background: '#fff', borderRadius: 'var(--radius-card)', padding: '40px 36px', width: '100%', maxWidth: 400, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   title:      { margin: '0 0 4px', fontSize: 26, fontWeight: 700, textAlign: 'center' },
   subtitle:   { margin: '0 0 24px', color: '#6b7280', textAlign: 'center', fontSize: 14 },

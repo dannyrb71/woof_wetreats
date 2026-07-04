@@ -92,7 +92,7 @@ function ConfirmationContent() {
     : null
 
   return (
-    <div style={s.page}>
+    <div className="layout-centered layout-centered--top" style={{ background: 'var(--page-bg)' }}>
       <div style={s.card}>
         {/* Success header */}
         <div style={s.successHeader}>
@@ -205,7 +205,7 @@ export default function ConfirmationPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:          { minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 16px', background: 'var(--page-bg)' },
+  // page shell comes from the layout kit (.layout-centered--top)
   center:        { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
   card:          { background: '#fff', borderRadius: 'var(--radius-card)', padding: '36px 32px', width: '100%', maxWidth: 520, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   successHeader: { textAlign: 'center', marginBottom: 28 },

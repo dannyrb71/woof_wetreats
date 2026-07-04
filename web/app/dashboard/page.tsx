@@ -9,11 +9,13 @@ import { SiteNav } from '@/components/SiteNav'
 import { DogCard, SharedDog } from '@/components/profile/DogCard'
 import { BalanceSection } from '@/components/profile/BalanceSection'
 import BookingForm from '@/components/booking/BookingForm'
-import { parseAnnouncement } from '@/components/staff/AnnouncementEditor'
+import { parseAnnouncement, announcementTheme } from '@/components/staff/AnnouncementEditor'
 import { ManageUsers } from '@/components/profile/ManageUsers'
 import { formatPhone } from '@/lib/format'
 import { ServicePill } from '@/components/shared/molecules/ServicePill'
 import { FeeBreakdownModal } from '@/components/staff/FeeBreakdownModal'
+import { BookingsArchive } from '@/components/profile/BookingsArchive'
+import { Money } from '@/components/shared/molecules/Money'
 import { StatusBadge, type StatusType } from '@/components/shared/molecules/StatusBadge'
 import { AddDogButton } from '@/components/shared/molecules/AddDogButton'
 
@@ -423,7 +425,7 @@ function ReservationCard({ res, onCancel }: { res: Reservation; onCancel: (id: s
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button type="button" onClick={() => setShowBreakdown(true)} className="btn btn-icon" title="View fee breakdown" aria-label="View fee breakdown" style={{ fontSize: 15, color: 'var(--text-secondary)' }}>ⓘ</button>
-          <span style={s.resPrice}>${Number(res.total_price).toFixed(2)}</span>
+          <Money value={Number(res.total_price)} cancelled={res.status === 'cancelled'} style={s.resPrice} />
         </div>
       </div>
       {showBreakdown && <FeeBreakdownModal reservationId={res.id} onClose={() => setShowBreakdown(false)} />}
@@ -560,14 +562,6 @@ function PastBookings({ past, onCancel }: { past: Reservation[]; onCancel: (id: 
     const set = new Set(past.map(r => r.dropoff_date.slice(0, 7)))  // YYYY-MM
     return [...set].sort((a, b) => b.localeCompare(a))               // newest first
   }, [past])
-  const byYear = useMemo(() => {
-    const map: Record<string, Reservation[]> = {}
-    for (const r of past) { (map[r.dropoff_date.slice(0, 4)] ??= []).push(r) }
-    return Object.entries(map)
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([y, list]) => [y, list.slice().sort((a, b) => b.dropoff_date.localeCompare(a.dropoff_date))] as [string, Reservation[]])
-  }, [past])
-
   const [idx,     setIdx]     = useState(0)
   const [showAll, setShowAll] = useState(false)
 
@@ -602,12 +596,9 @@ function PastBookings({ past, onCancel }: { past: Reservation[]; onCancel: (id: 
               <h3 style={{ ...s.sectionTitle, marginBottom: 0 }}>All Past &amp; Cancelled</h3>
               <button type="button" onClick={() => setShowAll(false)} className="btn btn-ghost btn-sm">Close</button>
             </div>
-            {byYear.map(([year, list]) => (
-              <div key={year} style={{ marginTop: 16 }}>
-                <p style={{ ...s.sectionTitle, color: 'var(--text-secondary)', marginBottom: 10 }}>{year}</p>
-                {list.map(res => <ReservationCard key={res.id} res={res} onCancel={onCancel} />)}
-              </div>
-            ))}
+            <div style={{ marginTop: 12 }}>
+              <BookingsArchive bookings={past} />
+            </div>
           </div>
         </div>
       )}
@@ -630,7 +621,7 @@ export default function DashboardPage() {
   const [cancelError,   setCancelError]   = useState('')
   const [addingDog,     setAddingDog]     = useState(false)
   const [showNewBooking, setShowNewBooking] = useState(false)
-  const [announcement, setAnnouncement] = useState<{ message: string; enabled: boolean } | null>(null)
+  const [announcement, setAnnouncement] = useState<{ message: string; enabled: boolean; color: string } | null>(null)
   const [annDismissed, setAnnDismissed] = useState(true)
   const [mgStatus,      setMgStatus]      = useState<ClientProfile['meet_greet_status']>('needed')
   const [mgRecord,      setMgRecord]      = useState<MeetGreetRecord | null>(null)
@@ -813,18 +804,21 @@ export default function DashboardPage() {
   if (error)   return <div style={s.center}><p style={{ color: 'var(--error)' }}>{error}</p></div>
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
-      <main style={s.main}>
+      <main className="page-body" style={{ '--page-max': '1100px' } as React.CSSProperties}>
 
         {/* ── Staff announcement banner ── */}
-        {announcement && !annDismissed && (
-          <div style={{ ...s.noteCard, marginBottom: 20 }}>
-            <span style={{ fontSize: 16, lineHeight: 1.4 }}>📢</span>
-            <p style={s.noteMsg}>{announcement.message}</p>
-            <button type="button" onClick={dismissAnnouncement} className="btn btn-xs" style={{ background: 'transparent', color: 'var(--primary-dark)', border: '1.5px solid var(--primary-dark)' }} aria-label="Dismiss announcement">Dismiss</button>
-          </div>
-        )}
+        {announcement && !annDismissed && (() => {
+          const t = announcementTheme(announcement.color)
+          return (
+            <div style={{ ...s.noteCard, marginBottom: 20, background: t.bg, borderColor: t.border }}>
+              <span style={{ fontSize: 16, lineHeight: 1.4 }}>📢</span>
+              <p style={{ ...s.noteMsg, color: t.text }}>{announcement.message}</p>
+              <button type="button" onClick={dismissAnnouncement} className="btn btn-xs" style={{ background: 'transparent', color: t.text, border: `1.5px solid ${t.text}` }} aria-label="Dismiss announcement">Dismiss</button>
+            </div>
+          )
+        })()}
 
         {/* ── Page header ── */}
         <div style={s.pageHeader}>
@@ -985,9 +979,7 @@ export default function DashboardPage() {
 
 // ── Styles ─────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  page:             { minHeight: '100vh', background: 'var(--background)' },
   center:           { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
-  main:             { maxWidth: 1100, margin: '0 auto', padding: '28px 24px 60px' },
   // Page header
   pageHeader:       { marginBottom: 20 },
   greeting:         { margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: 'var(--text-primary)' },

@@ -179,7 +179,7 @@ export function HouseholdCard({ household, onClick }: Props) {
           <div style={s.ownerCol}>
             <span style={s.ownerName}>{household.first_name} {household.last_name}</span>
             {household.phone && (
-              <a href={`tel:${household.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>
+              <a href={`sms:${household.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>
                 {formatPhone(household.phone)}
               </a>
             )}

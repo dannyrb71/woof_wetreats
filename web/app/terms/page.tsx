@@ -16,10 +16,10 @@ function Section({ n, title, children }: { n: number; title: string; children: R
 
 export default function TermsPage() {
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
 
-      <main style={s.main}>
+      <main className="page-body" style={{ '--page-max': '760px' } as React.CSSProperties}>
         <h1 style={s.h1}>Terms of Service</h1>
         <p style={s.effective}>Effective date: June 21, 2026</p>
         <p style={s.intro}>
@@ -140,6 +140,7 @@ export default function TermsPage() {
 
         <div style={s.backRow}>
           <a href="/" style={s.backLink}>← Back to home</a>
+          <a href="/privacy" style={s.backLink}>Privacy Policy</a>
         </div>
       </main>
     </div>
@@ -147,8 +148,7 @@ export default function TermsPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--page-bg)' },
-  main:        { maxWidth: 760, margin: '0 auto', padding: '40px 24px 60px' },
+  // page shell + body come from the layout kit (.page / .page-body)
   h1:          { margin: '0 0 4px', fontSize: 30, fontWeight: 800, color: '#111827' },
   effective:   { margin: '0 0 20px', fontSize: 14, color: '#9ca3af', fontWeight: 600 },
   intro:       { margin: '0 0 32px', fontSize: 16, lineHeight: 1.7, color: '#6b7280' },
@@ -159,6 +159,6 @@ const s: Record<string, React.CSSProperties> = {
   sectionBody: { fontSize: 15, lineHeight: 1.7, color: '#374151' },
   inlineLink:  { color: 'var(--primary)', fontWeight: 600 },
   signature:   { margin: '28px 0 0', fontSize: 15, fontWeight: 700, color: '#111827' },
-  backRow:     { marginTop: 24 },
+  backRow:     { marginTop: 24, display: 'flex', gap: 20 },
   backLink:    { fontSize: 14, color: '#6b7280', textDecoration: 'none' },
 }

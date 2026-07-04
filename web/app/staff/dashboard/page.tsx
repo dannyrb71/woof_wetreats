@@ -1,5 +1,5 @@
 'use client'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { SiteNav } from '@/components/SiteNav'
@@ -37,6 +37,16 @@ function fmtTime(t: string | null) { if (!t) return '—'; const [h, m] = t.spli
 function money(n: number) { return `$${n.toFixed(2)}` }
 function monthBounds(s: string) { const d = parse(s); return { start: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), end: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) } }
 function weekBounds(s: string) { const d = parse(s); const start = shift(s, -d.getDay()); return { start, end: shift(start, 6) } }
+function yearBounds(s: string) { const y = parse(s).getFullYear(); return { start: `${y}-01-01`, end: `${y}-12-31` } }
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// ISO-8601 week number (Mon-based) — used only for the "Week N" label.
+function isoWeek(s: string) {
+  const d = parse(s); const t = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const dayNr = (d.getDay() + 6) % 7; t.setDate(t.getDate() - dayNr + 3)
+  const firstThu = new Date(t.getFullYear(), 0, 4)
+  const firstDayNr = (firstThu.getDay() + 6) % 7; firstThu.setDate(firstThu.getDate() - firstDayNr + 3)
+  return 1 + Math.round((t.getTime() - firstThu.getTime()) / (7 * 86400000))
+}
 function greeting() { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening' }
 
 export default function DashboardPage() {
@@ -49,7 +59,9 @@ export default function DashboardPage() {
   const [mg, setMg] = useState<{ scheduled_time: string }[]>([])
   const [here, setHere] = useState<HereDog[]>([])
   const [loading, setLoading] = useState(true)
-  const [chartRange, setChartRange] = useState<'week' | 'month'>('month')
+  const [chartView, setChartView] = useState<'year' | 'month' | 'week'>('month')
+  const [chartAnchor, setChartAnchor] = useState(todayStr()) // any date inside the shown period
+  const touchX = useRef<number | null>(null)
 
   const load = useCallback(async (d: string) => {
     setLoading(true)
@@ -71,24 +83,19 @@ export default function DashboardPage() {
     setMg((mgR.data ?? []) as { scheduled_time: string }[])
     setPayments((payR.data ?? []) as { amount: number; paid_on: string }[])
 
-    // Currently here = boarding stays spanning the selected date.
-    const present = rows.filter(r => r.service_type === 'boarding' && r.dropoff_date <= d && r.pickup_date > d)
-    if (present.length) {
-      const { data: rd } = await supabase.from('reservation_dogs')
-        .select('reservation_id, dogs(name, gender, photo_url)')
-        .in('reservation_id', present.map(r => r.id))
-      const dogs: HereDog[] = (rd ?? []).map(row => {
-        const dg = (Array.isArray(row.dogs) ? row.dogs[0] : row.dogs) as { name: string; gender: string | null; photo_url: string | null } | null
-        return { name: dg?.name ?? '?', gender: dg?.gender ?? null, photo_url: dg?.photo_url ?? null, photoSigned: null }
-      })
-      const paths = [...new Set(dogs.map(x => x.photo_url).filter(Boolean) as string[])]
-      const signed: Record<string, string> = {}
-      if (paths.length) {
-        const { data: urls } = await supabase.storage.from('dog-photos').createSignedUrls(paths, 3600)
-        for (const u of urls ?? []) if (u.signedUrl && u.path) signed[u.path] = u.signedUrl
-      }
-      setHere(dogs.map(x => ({ ...x, photoSigned: x.photo_url ? (signed[x.photo_url] ?? null) : null })))
-    } else setHere([])
+    // On property right now = arrival checked AND departure not checked (RPC = single
+    // source of truth, boarding + daycare). Matches the daily-schedule check-offs.
+    const { data: presentDogs } = await supabase.rpc('dogs_present', { p_date: d })
+    const dogs: HereDog[] = (presentDogs ?? []).map((row: { dog_name: string; gender: string | null; photo_url: string | null }) => ({
+      name: row.dog_name, gender: row.gender, photo_url: row.photo_url, photoSigned: null,
+    }))
+    const paths = [...new Set(dogs.map(x => x.photo_url).filter(Boolean) as string[])]
+    const signed: Record<string, string> = {}
+    if (paths.length) {
+      const { data: urls } = await supabase.storage.from('dog-photos').createSignedUrls(paths, 3600)
+      for (const u of urls ?? []) if (u.signedUrl && u.path) signed[u.path] = u.signedUrl
+    }
+    setHere(dogs.map(x => ({ ...x, photoSigned: x.photo_url ? (signed[x.photo_url] ?? null) : null })))
     setLoading(false)
   }, [router, supabase])
 
@@ -102,7 +109,7 @@ export default function DashboardPage() {
 
   const presentBoarding = notCancelled.filter(r => r.service_type === 'boarding' && r.dropoff_date <= D && r.pickup_date > D)
   const daycareToday = notCancelled.filter(r => r.service_type === 'daycare' && r.dropoff_date === D)
-  const dogsHereNow = here.length + daycareToday.length // boarding dogs (real) + daycare reservations today
+  const dogsHereNow = here.length // present dogs (boarding + daycare) from dogs_present RPC
 
   const arrivals = notCancelled.filter(r => r.dropoff_date === D)
   const departures = notCancelled.filter(r => r.service_type === 'boarding' && r.pickup_date === D)
@@ -132,13 +139,44 @@ export default function DashboardPage() {
   const outstanding    = notCancelled.filter(r => !r.paid && r.status === 'completed').reduce((s, r) => s + Number(r.total_price), 0)
   const upcomingIncome = notCancelled.filter(r => !r.paid && (r.status === 'upcoming' || r.status === 'in_progress')).reduce((s, r) => s + Number(r.total_price), 0)
 
-  // chart: count of reservations per day by dropoff_date over the chosen range
-  const range = chartRange === 'week' ? week : month
-  const chart: { day: string; count: number }[] = []
-  for (let cur = range.start; cur <= range.end; cur = shift(cur, 1)) {
-    chart.push({ day: cur, count: notCancelled.filter(r => r.dropoff_date === cur).length })
+  // chart: bookings by drop-off date, over the anchored period. Week/Month plot one
+  // bar per day; Year aggregates into 12 monthly bars. `isToday` highlights the bar
+  // covering the actual current date (only visible when the period includes today).
+  const today = todayStr()
+  const chart: { key: string; count: number; label: string; isToday: boolean }[] = []
+  if (chartView === 'year') {
+    const yr = parse(chartAnchor).getFullYear()
+    const tParse = parse(today)
+    for (let m = 0; m < 12; m++) {
+      const count = notCancelled.filter(r => { const dt = parse(r.dropoff_date); return dt.getFullYear() === yr && dt.getMonth() === m }).length
+      chart.push({ key: `${yr}-${m}`, count, label: MONTHS_SHORT[m], isToday: tParse.getFullYear() === yr && tParse.getMonth() === m })
+    }
+  } else {
+    const range = chartView === 'week' ? weekBounds(chartAnchor) : monthBounds(chartAnchor)
+    for (let cur = range.start; cur <= range.end; cur = shift(cur, 1)) {
+      const dd = parse(cur).getDate()
+      const showLabel = chartView === 'week' || dd === 1 || dd % 5 === 0
+      chart.push({ key: cur, count: notCancelled.filter(r => r.dropoff_date === cur).length, label: showLabel ? String(dd) : '', isToday: cur === today })
+    }
   }
   const chartMax = Math.max(1, ...chart.map(c => c.count))
+
+  // Period label under the bars — "(current)" only when today falls in the window.
+  const pb = chartView === 'year' ? yearBounds(chartAnchor) : chartView === 'month' ? monthBounds(chartAnchor) : weekBounds(chartAnchor)
+  const periodText =
+    chartView === 'year'  ? String(parse(chartAnchor).getFullYear())
+    : chartView === 'month' ? parse(chartAnchor).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).replace(' ', ', ')
+    : `Week ${isoWeek(chartAnchor)}`
+  const periodCurrent = today >= pb.start && today <= pb.end
+
+  // Step the chart backward/forward by one whole period.
+  const stepChart = (dir: number) => setChartAnchor(a => {
+    const d = parse(a)
+    if (chartView === 'year') d.setFullYear(d.getFullYear() + dir)
+    else if (chartView === 'month') d.setMonth(d.getMonth() + dir)
+    else d.setDate(d.getDate() + dir * 7)
+    return ymd(d)
+  })
 
   // Labels are date-agnostic — the (now larger/darker) date under the picker heads
   // the whole row, so tiles don't repeat "Today"/the date. isToday only tweaks the
@@ -154,9 +192,9 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
-      <main style={s.main}>
+      <main className="page-body">
         {/* Header */}
         <div className="staff-header-3col" style={s.header}>
           <div className="page-header-text">
@@ -206,33 +244,47 @@ export default function DashboardPage() {
             ))}
           </section>
 
-          {/* Bookings by Day chart */}
+          {/* Bookings chart */}
           <section style={s.panel}>
-            <SectionHeader title="Bookings by Day" action={
-              <select value={chartRange} onChange={e => setChartRange(e.target.value as 'week' | 'month')} style={s.rangeSelect}>
-                <option value="month">This Month</option>
-                <option value="week">This Week</option>
+            <SectionHeader title="Bookings" action={
+              <select value={chartView} onChange={e => { setChartView(e.target.value as 'year' | 'month' | 'week'); setChartAnchor(todayStr()) }} style={s.rangeSelect}>
+                <option value="year">By Year</option>
+                <option value="month">By Month</option>
+                <option value="week">By Week</option>
               </select>
             } />
-            <div style={s.chart}>
-              {chart.map(c => {
-                const day = parse(c.day).getDate()
-                const showLabel = chartRange === 'week' || day === 1 || day % 5 === 0
-                return (
-                  <div key={c.day} style={s.barCol} title={`${c.day}: ${c.count} booking${c.count !== 1 ? 's' : ''}`}>
-                    <div style={{ ...s.bar, height: `${(c.count / chartMax) * 100}%`, background: c.day === D ? 'var(--primary-dark)' : 'var(--primary)' }} />
-                    <span style={s.barLabel}>{showLabel ? day : ''}</span>
+            <div style={s.chartRow}>
+              <button type="button" onClick={() => stepChart(-1)} style={s.chartArrow} aria-label="Previous period">‹</button>
+              <div
+                style={s.chart}
+                onPointerDown={e => { touchX.current = e.clientX }}
+                onPointerUp={e => {
+                  if (touchX.current === null) return
+                  const dx = e.clientX - touchX.current
+                  touchX.current = null
+                  if (Math.abs(dx) > 40) stepChart(dx < 0 ? 1 : -1) // swipe/drag left → forward
+                }}
+                onPointerLeave={() => { touchX.current = null }}
+              >
+                {chart.map(c => (
+                  <div key={c.key} style={s.barCol} title={`${c.label || c.key}: ${c.count} booking${c.count !== 1 ? 's' : ''}`}>
+                    <div style={{ ...s.bar, height: `${(c.count / chartMax) * 100}%`, background: c.isToday ? 'var(--primary-dark)' : 'var(--primary)' }} />
+                    <span style={s.barLabel}>{c.label}</span>
                   </div>
-                )
-              })}
+                ))}
+              </div>
+              <button type="button" onClick={() => stepChart(1)} style={s.chartArrow} aria-label="Next period">›</button>
             </div>
-            <p style={s.chartNote}>Bars = number of bookings per day (by drop-off date).</p>
+            <p style={s.periodLabel}>{periodText}{periodCurrent ? ' (current)' : ''}</p>
+            <p style={s.chartNote}>
+              Bars = bookings by drop-off date{chartView === 'year' ? ' (per month)' : ' (per day)'}. Swipe or use ‹ › to change {chartView === 'year' ? 'year' : chartView === 'month' ? 'month' : 'week'}.
+            </p>
           </section>
 
           {/* Currently Here */}
           <section style={s.panel}>
             <SectionHeader title="Currently Here" count={here.length} action={<a href="/staff/schedule" style={s.viewLink}>View all</a>} />
-            {here.length === 0 ? <p style={s.muted}>No dogs boarding on this date.</p> : (
+            {here.length === 0 ? <p style={s.muted}>No dogs on the property right now.</p> : (
               <div style={s.hereGrid}>
                 {here.slice(0, 6).map((d, i) => (
                   <div key={i} style={s.hereItem}>
@@ -253,8 +305,7 @@ export default function DashboardPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--background)' },
-  main:        { maxWidth: 1200, margin: '0 auto', padding: '28px 24px 60px' },
+  // page shell + body come from the layout kit (.page / .page-body)
   header:      {},
   greeting:    { margin: 0, fontSize: 26, fontWeight: 800, color: 'var(--text-primary)' },
   subtitle:    { margin: '4px 0 0', fontSize: 15, color: 'var(--text-secondary)' },
@@ -277,11 +328,14 @@ const s: Record<string, React.CSSProperties> = {
   revVal:      { fontSize: 17, fontWeight: 800 },
 
   rangeSelect: { fontSize: 13, padding: '6px 12px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit' },
-  chart:       { display: 'flex', alignItems: 'flex-end', gap: 3, height: 180, padding: '0 2px' },
+  chartRow:    { display: 'flex', alignItems: 'stretch', gap: 2 },
+  chartArrow:  { flexShrink: 0, width: 30, alignSelf: 'stretch', border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 26, lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit', padding: 0, borderRadius: 8 },
+  chart:       { flex: 1, display: 'flex', alignItems: 'flex-end', gap: 3, height: 180, padding: '0 2px', touchAction: 'pan-y', minWidth: 0 },
   barCol:      { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', gap: 4, minWidth: 0 },
   bar:         { width: '100%', maxWidth: 22, borderRadius: 6, minHeight: 2, transition: 'height 0.2s' },
   barLabel:    { fontSize: 10, color: 'var(--text-secondary)', height: 12 },
-  chartNote:   { margin: '10px 0 0', fontSize: 12, color: 'var(--text-secondary)' },
+  periodLabel: { margin: '12px 0 0', fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', textAlign: 'center' },
+  chartNote:   { margin: '6px 0 0', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' },
 
   hereGrid:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 12 },
   hereItem:    { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 0 },

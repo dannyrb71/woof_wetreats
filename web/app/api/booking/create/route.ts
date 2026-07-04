@@ -167,12 +167,14 @@ export async function POST(req: NextRequest) {
   }
 
   // 6. Server-side price calculation — this is what gets stored, never the client value.
-  //    Rates come from the DB (pricing_rates) via the security-definer RPC, so the
-  //    price reflects the rates in effect AT BOOKING TIME and can't be tampered with.
-  const { data: rates, error: ratesErr } = await supabase.rpc('get_pricing_rates')
+  //    We pin the CURRENT rate version onto the booking, so its price is frozen to
+  //    the rates in effect AT BOOKING TIME. Later rate changes create a new version
+  //    and never touch this booking (see get_current_rate_version / rate_version_id).
+  const { data: rates, error: ratesErr } = await supabase.rpc('get_current_rate_version')
   if (ratesErr || !rates) {
     return NextResponse.json({ error: 'Could not load pricing. Please try again.' }, { status: 500 })
   }
+  const rateVersionId = (rates as { id: number }).id
   let serverPrice: number
   try {
     const result = calculatePrice({
@@ -204,6 +206,7 @@ export async function POST(req: NextRequest) {
       pickup_time,
       payment_method,
       total_price:       serverPrice,
+      rate_version_id:   rateVersionId,
       status:            'upcoming',
       care_notes:        care_notes?.trim() || null,
       // Record Terms acceptance at the moment the booking is created.

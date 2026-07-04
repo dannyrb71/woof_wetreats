@@ -37,6 +37,7 @@ interface ScheduleRow {
   pickup_date:    string | null
   care_notes:     string | null
   completed:      boolean
+  arrived:        boolean   // daycare only: arrival checked (present but not yet departed)
   dogs:           ScheduleDog[]
 }
 
@@ -143,11 +144,12 @@ function ScheduleSection({ title, count, open, onToggle, isMobile, children }: {
 }
 
 // ── Today's Activity card ──────────────────────────────────────
-function ActivityCard({ row, onOpen, onToggle, onBreakdown }: {
-  row:         ScheduleRow
-  onOpen:      (clientId: string) => void
-  onToggle:    (row: ScheduleRow, next: boolean) => void
-  onBreakdown: (resId: string) => void
+function ActivityCard({ row, onOpen, onToggle, onToggleArrived, onBreakdown }: {
+  row:             ScheduleRow
+  onOpen:          (clientId: string) => void
+  onToggle:        (row: ScheduleRow, next: boolean) => void
+  onToggleArrived: (row: ScheduleRow, next: boolean) => void
+  onBreakdown:     (resId: string) => void
 }) {
   const [hovered, setHovered] = useState(false)
   const nights = row.dropoff_date && row.pickup_date ? totalNights(row.dropoff_date, row.pickup_date) : 0
@@ -168,14 +170,31 @@ function ActivityCard({ row, onOpen, onToggle, onBreakdown }: {
     >
       <div style={s.cardTop}>
         <div style={s.cardLeft}>
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={false}
-            aria-label="Mark done"
-            onClick={e => { e.stopPropagation(); onToggle(row, true) }}
-            style={s.checkbox}
-          />
+          {row.activity_type === 'daycare' ? (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <button type="button" role="checkbox" aria-checked={row.arrived} aria-label="Mark arrived"
+                  onClick={e => { e.stopPropagation(); onToggleArrived(row, !row.arrived) }}
+                  style={row.arrived ? s.checkedBox : s.checkbox}>{row.arrived ? '✓' : ''}</button>
+                <span style={s.miniLabel}>In</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <button type="button" role="checkbox" aria-checked={false} aria-label="Mark departed"
+                  onClick={e => { e.stopPropagation(); onToggle(row, true) }}
+                  style={s.checkbox} />
+                <span style={s.miniLabel}>Out</span>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={false}
+              aria-label="Mark done"
+              onClick={e => { e.stopPropagation(); onToggle(row, true) }}
+              style={s.checkbox}
+            />
+          )}
           <ServicePill type={ACT_TO_PILL[row.activity_type]} />
           {longStay && <ServicePill type="long-stay" />}
           {timeStr && <span style={s.time}>{timeStr}</span>}
@@ -185,7 +204,7 @@ function ActivityCard({ row, onOpen, onToggle, onBreakdown }: {
             <button type="button" onClick={e => { e.stopPropagation(); onBreakdown(row.reservation_id!) }} className="btn btn-icon" style={{ fontSize: 15, color: 'var(--text-secondary)' }} title="View fee breakdown" aria-label="View fee breakdown">ⓘ</button>
           )}
           <span style={s.ownerName}>{row.first_name} {row.last_name}</span>
-          {row.phone && <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
+          {row.phone && <a href={`sms:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
         </div>
       </div>
       <CareNotesPreview notes={row.care_notes} />
@@ -238,7 +257,7 @@ function InProgressCard({ row, date, onOpen, onToggle, onBreakdown }: {
             <button type="button" onClick={e => { e.stopPropagation(); onBreakdown(row.reservation_id!) }} className="btn btn-icon" style={{ fontSize: 15, color: 'var(--text-secondary)' }} title="View fee breakdown" aria-label="View fee breakdown">ⓘ</button>
           )}
           <span style={s.ownerName}>{row.first_name} {row.last_name}</span>
-          {row.phone && <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
+          {row.phone && <a href={`sms:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
         </div>
       </div>
       {row.dropoff_date && row.pickup_date && (
@@ -292,7 +311,7 @@ function CompletedCard({ row, onOpen, onToggle, onBreakdown }: {
             <button type="button" onClick={e => { e.stopPropagation(); onBreakdown(row.reservation_id!) }} className="btn btn-icon" style={{ fontSize: 15, color: 'var(--text-secondary)' }} title="View fee breakdown" aria-label="View fee breakdown">ⓘ</button>
           )}
           <span style={s.ownerName}>{row.first_name} {row.last_name}</span>
-          {row.phone && <a href={`tel:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
+          {row.phone && <a href={`sms:${row.phone}`} onClick={e => e.stopPropagation()} style={s.phone}>{formatPhone(row.phone)}</a>}
         </div>
       </div>
       {row.dogs.length > 0 && (
@@ -353,7 +372,7 @@ export default function SchedulePage() {
     typeof window !== 'undefined' && window.innerWidth <= 980
   )
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 980px)')
+    const mq = window.matchMedia('(max-width: 768px)') // md — matches when the schedule stacks
     setIsMobile(mq.matches)
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
     mq.addEventListener('change', handler)
@@ -429,12 +448,28 @@ export default function SchedulePage() {
       const fn = next ? 'complete_meet_greet' : 'reopen_meet_greet'
       ;({ error } = await supabase.rpc(fn, { p_meet_greet_id: row.meet_greet_id }))
     } else if (row.reservation_id) {
+      // Daycare "done" = departed → its own activity type (arrival is tracked separately).
+      const activity = row.activity_type === 'daycare' ? 'daycare_departure' : row.activity_type
       ;({ error } = await supabase.rpc('set_schedule_item_complete', {
-        p_reservation_id: row.reservation_id, p_activity_type: row.activity_type, p_date: date, p_complete: next,
+        p_reservation_id: row.reservation_id, p_activity_type: activity, p_date: date, p_complete: next,
       }))
     }
     if (error) {
       setRows(prev => prev.map(r => matches(r) ? { ...r, completed: !next } : r))
+      setError('Could not update — try again.')
+    }
+  }, [supabase, date])
+
+  // Daycare arrival check (present-but-not-departed). Separate from the "done"/departed toggle.
+  const toggleArrived = useCallback(async (row: ScheduleRow, next: boolean) => {
+    const matches = (r: ScheduleRow) => r.reservation_id === row.reservation_id && r.activity_type === row.activity_type
+    setRows(prev => prev.map(r => matches(r) ? { ...r, arrived: next } : r))
+    if (!row.reservation_id) return
+    const { error } = await supabase.rpc('set_schedule_item_complete', {
+      p_reservation_id: row.reservation_id, p_activity_type: 'daycare_arrival', p_date: date, p_complete: next,
+    })
+    if (error) {
+      setRows(prev => prev.map(r => matches(r) ? { ...r, arrived: !next } : r))
       setError('Could not update — try again.')
     }
   }, [supabase, date])
@@ -454,10 +489,10 @@ export default function SchedulePage() {
   const completedItems = rows.filter(r => r.group_num === 1 && r.completed && !isStartedArrival(r))
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
 
-      <main style={s.main}>
+      <main className="page-body">
         {/* ── Header ── */}
         <div className="staff-header-3col">
           <div className="page-header-text">
@@ -509,6 +544,7 @@ export default function SchedulePage() {
                           row={r}
                           onOpen={openHousehold}
                           onToggle={toggleComplete}
+                          onToggleArrived={toggleArrived}
                           onBreakdown={setBreakdownResId}
                         />
                       ))
@@ -583,8 +619,7 @@ export default function SchedulePage() {
 
 // ── Styles ─────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--page-bg)' },
-  main:        { maxWidth: 1200, margin: '0 auto', padding: '28px 24px 60px' },
+  // page shell + body come from the layout kit (.page / .page-body)
 
   // Header
   pageTitle:   { margin: '0 0 4px', fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' },
@@ -615,6 +650,7 @@ const s: Record<string, React.CSSProperties> = {
   // Checkbox states
   checkbox:    { width: 22, height: 22, borderRadius: '50%', border: '2px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1 },
   checkedBox:  { width: 22, height: 22, borderRadius: '50%', background: 'var(--success)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, flexShrink: 0, border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1 },
+  miniLabel:   { fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1 },
 
   // Pills
   longStayPill:{ display: 'inline-flex', alignItems: 'center', height: 22, background: 'var(--status-long-stay)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '0 10px', borderRadius: 999, whiteSpace: 'nowrap', boxSizing: 'border-box', lineHeight: 1 },

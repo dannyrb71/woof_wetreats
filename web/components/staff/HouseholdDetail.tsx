@@ -10,6 +10,7 @@ import { ServicePill } from '@/components/shared/molecules/ServicePill'
 import { StatusBadge } from '@/components/shared/molecules/StatusBadge'
 import { AddDogButton } from '@/components/shared/molecules/AddDogButton'
 import { DogCard } from '@/components/profile/DogCard'
+import { ManageUsers } from '@/components/profile/ManageUsers'
 
 // ── Constants ──────────────────────────────────────────────────
 const TIME_SLOTS: { value: string; label: string }[] = []
@@ -186,6 +187,9 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   // ── Fetched data ───────────────────────────────────────────
   const [detail,      setDetail]      = useState<ClientDetail | null>(null)
   const [clientSince, setClientSince] = useState<string | null>(null)
+  // Co-owner fields for the Manage Users card (staff-side reuse of the client component).
+  const [owners,      setOwners]      = useState<{ auth_id: string | null; secondary_auth_id: string | null; secondary_invite_email: string | null; secondary_first_name: string | null; secondary_last_name: string | null } | null>(null)
+  const [staffUid,    setStaffUid]    = useState('')
   const [calRes,      setCalRes]      = useState<CalRes[]>([])
   const [paidMap,     setPaidMap]     = useState<Record<string, number>>({})
   const [calLoading,  setCalLoading]  = useState(true)
@@ -199,9 +203,18 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
       supabase.from('reservations')
         .select('id,service_type,status,dropoff_date,pickup_date,paid,total_price')
         .eq('client_id', household.client_id).order('dropoff_date', { ascending: true }),
-      supabase.from('clients').select('created_at').eq('id', household.client_id).single(),
+      supabase.from('clients')
+        .select('created_at, auth_id, secondary_auth_id, secondary_invite_email, secondary_first_name, secondary_last_name')
+        .eq('id', household.client_id).single(),
     ])
     if (detR.data?.[0]) setDetail(detR.data[0])
+    if (cliR.data) setOwners({
+      auth_id:                cliR.data.auth_id ?? null,
+      secondary_auth_id:      cliR.data.secondary_auth_id ?? null,
+      secondary_invite_email: cliR.data.secondary_invite_email ?? null,
+      secondary_first_name:   cliR.data.secondary_first_name ?? null,
+      secondary_last_name:    cliR.data.secondary_last_name ?? null,
+    })
     setCalRes((resR.data ?? []) as CalRes[])
 
     // Amount paid per booking (payment ledger) so Outstanding nets out partials.
@@ -220,6 +233,13 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
   }, [household.client_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Staff's own auth id — passed to ManageUsers so the "you" badge and the
+  // self-service "change your login email" control never render for staff
+  // (their id won't match the household's primary/secondary owner).
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setStaffUid(data.user?.id ?? ''))
+  }, [supabase])
 
   // ── Calendar nav ───────────────────────────────────────────
   const [calYear,  setCalYear]  = useState(now.getFullYear())
@@ -536,6 +556,22 @@ export function HouseholdDetail({ household, onBack, onUpdate, embedded = false 
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* MANAGE USERS (co-owners) — same component as the client dashboard,
+                pointed at the viewed household. Staff authUid hides self-only controls. */}
+            <div style={{ marginBottom: 16 }}>
+              <ManageUsers
+                clientId={household.client_id}
+                authUid={staffUid}
+                primaryAuthId={owners?.auth_id ?? null}
+                primaryName={`${household.first_name} ${household.last_name}`.trim()}
+                primaryEmail={detail?.email ?? ''}
+                secondaryAuthId={owners?.secondary_auth_id ?? null}
+                secondaryEmail={owners?.secondary_invite_email ?? null}
+                secondaryName={`${owners?.secondary_first_name ?? ''} ${owners?.secondary_last_name ?? ''}`.trim()}
+                onChanged={loadData}
+              />
             </div>
 
             {/* MEET & GREET — sp-meet-greet */}

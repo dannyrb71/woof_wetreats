@@ -2,7 +2,7 @@
 // Shown immediately when a client's blocked field is true.
 export default function BlockedPage() {
   return (
-    <div style={s.page}>
+    <div className="layout-centered">
       <div style={s.card}>
         <span style={s.icon}>🚫</span>
         <h1 style={s.title}>This service is no longer available to you</h1>
@@ -16,7 +16,7 @@ export default function BlockedPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:  { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  // page shell comes from the layout kit (.layout-centered)
   card:  { background: '#fff', borderRadius: 'var(--radius-card)', padding: '48px 36px', width: '100%', maxWidth: 440, boxShadow: '0 4px 24px rgba(0,0,0,0.08)', textAlign: 'center' },
   icon:  { fontSize: 48 },
   title: { margin: '16px 0 12px', fontSize: 22, fontWeight: 700, color: '#111827' },

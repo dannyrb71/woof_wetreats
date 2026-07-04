@@ -21,6 +21,7 @@ const STAFF_LINKS = [
   { label: 'Dashboard', href: '/staff/dashboard' }, // Batch 11c — new dashboard
   { label: 'Schedule',  href: '/staff/schedule' },  // TODO(11d): merge Availability
   { label: 'Clients',   href: '/staff' },            // current Staff Dashboard (Clients)
+  { label: 'Reports',   href: '/staff/reports' },    // Batch 11g — business analytics
   { label: 'Rover',     href: '/staff/rover' },
 ]
 

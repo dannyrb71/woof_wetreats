@@ -98,23 +98,27 @@ body {
 /* ── Tab bar (Settings and any other tabbed UI) ─────────────────
    Underline flush to the bar's bottom line; active tab = --dog-male text +
    underline. Needs border-radius:0 !important to beat the global pill radius. */
-.tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 0; padding-left: 24px; flex-wrap: wrap; }
+/* Settings tabs — flat pill buttons (same language as the Reports controls). */
+.tab-bar { display: flex; gap: 8px; margin-bottom: 20px; padding-left: 24px; flex-wrap: wrap; }
 .tab-btn {
-  border-radius: 0 !important;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer;
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
   font-family: inherit;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.tab-btn:hover:not(.tab-btn-active) { color: var(--text-primary); }
-.tab-btn-active { color: var(--dog-male); border-bottom-color: var(--dog-male); }
+.tab-btn:hover:not(:disabled) { box-shadow: none; filter: none; border-color: var(--primary); }
+.tab-btn:active:not(:disabled) { box-shadow: none; filter: none; transform: none; }
+.tab-btn:focus { outline: none; box-shadow: none; }
+.tab-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.tab-btn-active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.tab-btn-active:hover:not(:disabled) { border-color: var(--primary); }
 
 /* ── Responsive navigation (Batch 11a) ──────────────────────────
    Inline styles can't express media queries, so the desktop/mobile switch
@@ -122,19 +126,74 @@ body {
 .nav-desktop { display: flex; align-items: center; gap: 22px; }
 .nav-hamburger { display: none; }
 
-@media (max-width: 860px) {
+@media (max-width: 768px) {
   .nav-desktop { display: none; }
   .nav-hamburger { display: inline-flex; }
 }
 
-/* Dashboard 3-column body → single column on tablet/mobile */
+/* =====================================================================
+   LAYOUT KIT — the standard building blocks for every page.
+   RULE (use these going forward): compose new pages from these primitives
+   instead of writing bespoke per-page grids. Flexible grid columns ALWAYS
+   use minmax(0, …) — never bare 1fr/2fr (bare fr overflows on wide/nowrap
+   content). Canonical breakpoints (max-width): sm 640 · md 768 · lg 1024.
+     - .layout-2col + rail layouts → stack below md (768)
+     - .layout-3col + dashboard   → stack below lg (1024)
+     - nav → hamburger + headers stack below md (768)
+     - phone polish (tighter padding, 1-col cards) below sm (640)
+
+   Structure:
+     .page                        full-height background shell
+       .page-header-2col / -3col  title row (2col = title+action, 3col = +date nav)
+       .page-body                 centered max-width column + standard padding
+         one of:
+           .layout-1col           single readable column
+           .layout-2col           rail + main  (1/3 · 2/3)
+           .layout-3col           1/3 · 2/3 · 1/3   (dashboard)
+             .card-grid           responsive card grid (usable in any column)
+     .layout-centered             centered single card (auth / set-password / blocked)
+
+   Tokens (override per-page inline if needed):
+     --page-max (1200px) · --card-min (300px) · --layout-gap (20px)
+   ===================================================================== */
+:root { --page-max: 1200px; --card-min: 300px; --layout-gap: 20px; }
+
+.page       { min-height: 100vh; background: var(--page-bg, var(--background)); }
+.page-body  { max-width: var(--page-max); margin: 0 auto; padding: 28px 24px 60px; }
+.page-body--narrow { --page-max: 860px; }
+
+.layout-1col { display: flex; flex-direction: column; gap: var(--layout-gap); }
+.layout-2col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 24px; align-items: start; }
+.layout-3col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 768px) {   /* md — 2-column layouts stack */
+  .layout-2col { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1024px) {  /* lg — 3-column layout stacks */
+  .layout-3col { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* sm — phone polish */
+@media (max-width: 640px) {
+  .page-body { padding: 20px 16px 48px; }
+  .card-grid { grid-template-columns: minmax(0, 1fr); }
+  :root { --layout-gap: 14px; }
+}
+
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr)); gap: 16px; align-items: start; }
+
+.layout-centered { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* top-aligned variant for long forms (onboarding, booking) that scroll from the top */
+.layout-centered--top { align-items: flex-start; padding: 40px 16px; }
+
+/* Dashboard 3-column body → single column on tablet/mobile.
+   (Legacy class — equivalent to .layout-3col; keeps readable explicit mins.) */
 .dash-body {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr) minmax(220px, 1fr);
   gap: 16px;
 }
-@media (max-width: 980px) {
-  .dash-body { grid-template-columns: 1fr; align-items: start; }
+@media (max-width: 1024px) {
+  .dash-body { grid-template-columns: minmax(0, 1fr); align-items: start; }
 }
 
 /* ── Staff page headers ─────────────────────────────────────────
@@ -174,7 +233,7 @@ body {
 .date-navigator { display: flex; flex-direction: column; align-items: center; }
 .date-nav-row   { display: flex; align-items: center; gap: 8px; }
 
-@media (max-width: 860px) {
+@media (max-width: 768px) {
   /* 3-col header → single centered column */
   .staff-header-3col {
     grid-template-columns: 1fr;
@@ -206,12 +265,14 @@ body {
 /* ── Daily Schedule two-column layout ──────────────────────────── */
 .sched-body {
   display: grid;
-  grid-template-columns: minmax(280px, 35%) 1fr;
+  /* minmax(0, …) lets the right column shrink below its content's intrinsic
+     width so cards wrap/ellipsize instead of overflowing off the right edge. */
+  grid-template-columns: minmax(280px, 35%) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
-@media (max-width: 980px) {
-  .sched-body { grid-template-columns: 1fr; }
+@media (max-width: 768px) {
+  .sched-body { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ── Profile / Dashboard 2-column layout ──────────────────────
@@ -228,7 +289,8 @@ body {
 .profile-layout-staff,
 .profile-layout-client {
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  /* minmax(0, …) prevents wide/nowrap children from forcing horizontal overflow. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   grid-template-areas: "col-left col-right";
   gap: 24px;
   align-items: start;
@@ -236,9 +298,9 @@ body {
 .profile-col-left  { grid-area: col-left;  display: flex; flex-direction: column; gap: 20px; }
 .profile-col-right { grid-area: col-right; display: flex; flex-direction: column; gap: 20px; }
 
-@media (max-width: 860px) {
+@media (max-width: 768px) {
   .profile-layout-staff {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas: none;
   }
   /* Flatten column wrappers; their children become direct grid children */
@@ -256,7 +318,7 @@ body {
   .sp-client-access { order: 8; }
 
   .profile-layout-client {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "col-right" "col-left";
   }
 }
@@ -427,6 +489,34 @@ button:disabled {
 .btn-destructive-outlined:focus-visible {
   outline-color: var(--error);
 }
+
+/* ── Segmented / tab buttons (Reports controls + tabs, Settings tabs) ─────────
+   Flat pill buttons: white when unselected, primary when selected. Explicitly
+   neutralizes the global button hover box-shadow (which otherwise reads as a
+   stray outline on the white pills) and only shows a focus ring on keyboard nav. */
+.seg-btn {
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.seg-btn:hover:not(:disabled) { box-shadow: none; filter: none; border-color: var(--primary); }
+.seg-btn:active:not(:disabled) { box-shadow: none; filter: none; transform: none; }
+.seg-btn:focus { outline: none; box-shadow: none; }
+.seg-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.seg-btn.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.seg-btn.is-active:hover:not(:disabled) { border-color: var(--primary); }
 
 /* ── Interaction states ───────────────────────────────────────── */
 .btn:hover:not(:disabled) { filter: brightness(0.92); }

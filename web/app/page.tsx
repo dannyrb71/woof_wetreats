@@ -36,7 +36,7 @@ export default function LandingPage() {
   }, [])
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
 
       {/* ── Hero photo ── */}
@@ -47,7 +47,7 @@ export default function LandingPage() {
         }
       </div>
 
-      <main style={s.main}>
+      <main className="page-body" style={{ '--page-max': '980px' } as React.CSSProperties}>
         {/* ── Intro copy (editable via Settings → Landing Page) ── */}
         <section style={s.intro}>
           <h1 style={s.h1}>{copy.headline}</h1>
@@ -112,11 +112,10 @@ export default function LandingPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:           { minHeight: '100vh', background: 'var(--page-bg)' },
+  // page shell + body come from the layout kit (.page / .page-body)
   hero:           { width: '100%', maxWidth: 980, margin: '0 auto', padding: '20px 24px 0' },
   heroImg:        { width: '100%', height: 360, objectFit: 'cover', borderRadius: 16, display: 'block' },
   heroPlaceholder:{ width: '100%', height: 360, borderRadius: 16, background: 'linear-gradient(135deg, #dbeafe, #fef3c7)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  main:           { maxWidth: 980, margin: '0 auto', padding: '32px 24px 48px' },
   intro:          { maxWidth: 680 },
   h1:             { margin: '0 0 16px', fontSize: 32, fontWeight: 800, color: '#111827' },
   lead:           { margin: '0 0 16px', fontSize: 18, lineHeight: 1.6, color: '#374151' },

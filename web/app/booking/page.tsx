@@ -26,7 +26,7 @@ export default function BookingPage() {
   )
 
   return (
-    <div style={s.page}>
+    <div className="layout-centered layout-centered--top">
       <div style={s.card}>
         <div style={s.header}>
           <button type="button" onClick={() => router.push('/dashboard')} style={s.back}>← Back</button>
@@ -39,7 +39,7 @@ export default function BookingPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:   { minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '32px 16px' },
+  // page shell comes from the layout kit (.layout-centered--top)
   card:   { background: '#fff', borderRadius: 'var(--radius-card)', padding: '28px 32px', width: '100%', maxWidth: 660, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   header: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 4 },
   back:   { background: 'none', border: 'none', color: '#6b7280', fontSize: 14, cursor: 'pointer', padding: 0 },

@@ -90,14 +90,26 @@ export function PricingEditor() {
       payload[k] = n
     }
     setSaving(true)
-    const { error } = await supabase.from('pricing_rates')
-      .update({ ...payload, updated_at: new Date().toISOString() }).eq('id', 1)
+    // Records a NEW rate version and mirrors it into the live rates. Existing
+    // bookings stay pinned to the version they were created under, so their
+    // pricing never changes; only future bookings use these new rates.
+    const { error } = await supabase.rpc('save_pricing_rates', {
+      p_regular_1st:   payload.regular_1st_cash,
+      p_regular_extra: payload.regular_extra_cash,
+      p_extended_1st:  payload.extended_1st_cash,
+      p_extended_extra:payload.extended_extra_cash,
+      p_holiday_1st:   payload.holiday_1st_cash,
+      p_holiday_extra: payload.holiday_extra_cash,
+      p_daycare_1st:   payload.daycare_1st_cash,
+      p_venmo:         payload.venmo_surcharge,
+      p_puppy:         payload.puppy_surcharge,
+    })
     setSaving(false)
     if (error) { setErr('Save failed — please try again.'); return }
     const normalized = {} as Draft
     for (const k of ALL_KEYS) normalized[k] = fmt(payload[k])
     setDraft(normalized); setSaved(normalized)
-    setNotice('Pricing saved. New rates apply to future bookings only — existing bookings are unchanged.')
+    setNotice('Pricing saved as a new rate version. New rates apply to future bookings only — existing bookings keep the version they were created under.')
   }
 
   if (loading) return <p style={s.muted}>Loading…</p>

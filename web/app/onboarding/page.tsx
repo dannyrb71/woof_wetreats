@@ -361,7 +361,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div style={s.page}>
+    <div className="layout-centered layout-centered--top">
       <div style={s.card}>
         <h2 style={s.heading}>
           {step === 1 ? 'Welcome! Let\'s set up your profile.' :
@@ -411,7 +411,7 @@ export default function OnboardingPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:     { minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px' },
+  // page shell comes from the layout kit (.layout-centered--top)
   card:     { background: '#fff', borderRadius: 'var(--radius-card)', padding: '36px 32px', width: '100%', maxWidth: 480, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
   heading:  { margin: '0 0 20px', fontSize: 22, fontWeight: 700 },
   stepHint: { margin: '0 0 14px', fontSize: 14, color: '#6b7280' },

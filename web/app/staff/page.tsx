@@ -184,11 +184,11 @@ export default function StaffPage() {
   }
 
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
 
       {/* ── Card grid ── */}
-      <main style={s.main}>
+      <main className="page-body">
         <div className="staff-header-2col" style={s.toolbar}>
           <div className="page-header-text">
             <h2 style={s.pageHeading}>Clients</h2>
@@ -270,7 +270,7 @@ export default function StaffPage() {
             </p>
           </div>
         ) : (
-          <div style={s.grid}>
+          <div className="card-grid" style={{ '--card-min': '320px' } as React.CSSProperties}>
             {sorted.map(h => (
               <HouseholdCard
                 key={h.client_id}
@@ -286,9 +286,8 @@ export default function StaffPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--background)' },
+  // page shell + card grid now come from the layout kit (.page / .page-body / .card-grid)
   center:      { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' },
-  main:        { maxWidth: 1200, margin: '0 auto', padding: '32px 24px' },
   toolbar:     { marginBottom: 16 },
   pageHeading: { margin: 0, fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' },
   subtitle:    { margin: '4px 0 0', fontSize: 15, color: 'var(--text-secondary)' },
@@ -300,7 +299,6 @@ const s: Record<string, React.CSSProperties> = {
   legendCircle:{ minWidth: 40, height: 40, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 800, color: '#fff', flexShrink: 0, padding: '0 8px' },
   legendText:  { fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', flex: 1, textTransform: 'uppercase', letterSpacing: '0.06em' },
 
-  grid:        { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20, alignItems: 'start' },
   empty:       { textAlign: 'center', padding: '80px 24px' },
 
   rangeRow:      { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 24 },

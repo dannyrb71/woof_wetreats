@@ -6,6 +6,7 @@ import { calculatePrice, getHolidayDateRange } from '@/lib/pricing-engine'
 import type { PricingResult, PaymentMethod, ServiceType, RateTable } from '@/lib/pricing-engine'
 import DatePicker from './DatePicker'
 import TimePicker from './TimePicker'
+import { RateChartModal } from './RateChartModal'
 
 interface Dog { id: string; name: string; birthdate: string }
 
@@ -59,6 +60,7 @@ export default function BookingForm() {
   const [pricing,      setPricing]      = useState<PricingResult | null>(null)
   const [pricingError, setPricingError] = useState('')
   const [rates,        setRates]        = useState<RateTable | null>(null)
+  const [showRates,    setShowRates]    = useState(false)
 
   // Holiday dates for the next 2 years — computed once, no I/O required.
   const holidayDates = useMemo(() => {
@@ -395,7 +397,12 @@ export default function BookingForm() {
 
       {/* ── Live price preview ────────────────────────────── */}
       <section style={{ ...s.section, ...s.priceBox }}>
-        <h3 style={{ ...s.sectionTitle, margin: 0 }}>Price estimate</h3>
+        <div style={s.priceHead}>
+          <h3 style={{ ...s.sectionTitle, margin: 0 }}>Price estimate</h3>
+          {rates && (
+            <button type="button" onClick={() => setShowRates(true)} style={s.seeRates}>See full rates</button>
+          )}
+        </div>
         {pricingError && <p style={{ color: '#ef4444', fontSize: 13, margin: '8px 0 0' }}>{pricingError}</p>}
         {!pricing && !pricingError && (
           <p style={{ color: '#9ca3af', fontSize: 13, margin: '8px 0 0' }}>
@@ -473,6 +480,8 @@ export default function BookingForm() {
       >
         {submitting ? 'Submitting…' : 'Submit'}
       </button>
+
+      {showRates && rates && <RateChartModal rates={rates} onClose={() => setShowRates(false)} />}
     </div>
   )
 }
@@ -496,6 +505,8 @@ const s: Record<string, React.CSSProperties> = {
   select:        { fontSize: 14, padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#111827', fontFamily: 'inherit', cursor: 'pointer' },
   occSummary:    { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 14px' },
   priceBox:      { background: 'var(--surface-muted)', borderRadius: 'var(--radius-card)', padding: 16, border: '1px solid #e5e7eb', marginTop: 4 },
+  priceHead:     { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  seeRates:      { border: 'none', background: 'transparent', color: 'var(--primary)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', padding: 0 },
   totalRow:      { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10 },
   totalLabel:    { fontWeight: 600, fontSize: 15, color: '#111827' },
   totalAmount:   { fontWeight: 700, fontSize: 24, color: 'var(--primary)' },

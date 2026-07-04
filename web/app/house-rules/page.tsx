@@ -16,10 +16,10 @@ function Policy({ n, title, children }: { n: number; title: string; children: Re
 
 export default function HouseRulesPage() {
   return (
-    <div style={s.page}>
+    <div className="page">
       <SiteNav />
 
-      <main style={s.main}>
+      <main className="page-body" style={{ '--page-max': '760px' } as React.CSSProperties}>
         <h1 style={s.h1}>House Rules &amp; Policies</h1>
         <p style={s.intro}>
           A few house rules keep every visit safe, happy, and fair to all our furry guests.
@@ -128,8 +128,7 @@ export default function HouseRulesPage() {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:        { minHeight: '100vh', background: 'var(--page-bg)' },
-  main:        { maxWidth: 760, margin: '0 auto', padding: '40px 24px 60px' },
+  // page shell + body come from the layout kit (.page / .page-body)
   h1:          { margin: '0 0 12px', fontSize: 30, fontWeight: 800, color: '#111827' },
   intro:       { margin: '0 0 32px', fontSize: 16, lineHeight: 1.7, color: '#6b7280' },
   policy:      { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-card)', padding: '22px 24px', marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },

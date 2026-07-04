@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { calculatePrice } from '@/lib/pricing-engine'
+import { Money } from '@/components/shared/molecules/Money'
 import type { RateTable, PeriodBreakdown } from '@/lib/pricing-engine'
 
 interface Props {
@@ -17,6 +18,10 @@ interface ResData {
   total_price:     number
   price_overridden: boolean
   paid:            boolean
+  status:          string
+  rate_version_id: number | null
+  referral_free:     boolean
+  referral_discount: number
 }
 interface DogData { id: string; name: string; birthdate: string }
 
@@ -47,6 +52,7 @@ const RATE_COLOR: Record<string, string> = {
   holiday:  'var(--status-daycare)',
   daycare:  'var(--status-daycare)',
 }
+const PAY_LABEL: Record<string, string> = { cash: '💵 Cash', venmo: '💙 Venmo' }
 
 export function FeeBreakdownModal({ reservationId, onClose }: Props) {
   const supabase = createClient()
@@ -67,18 +73,18 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
 
   useEffect(() => {
     async function load() {
-      const [resR, rdR, ratesR, paysR] = await Promise.all([
+      const [resR, rdR, paysR] = await Promise.all([
         supabase.from('reservations')
-          .select('service_type, dropoff_date, pickup_date, payment_method, total_price, price_overridden, paid')
+          .select('service_type, dropoff_date, pickup_date, payment_method, total_price, price_overridden, paid, status, rate_version_id, referral_free, referral_discount')
           .eq('id', reservationId).single(),
         supabase.from('reservation_dogs')
           .select('dog_id, dogs(id, name, birthdate)')
           .eq('reservation_id', reservationId),
-        supabase.rpc('get_pricing_rates'),
         supabase.from('reservation_payments').select('amount').eq('reservation_id', reservationId),
       ])
       if (resR.error || !resR.data) { setErr('Could not load booking.'); setLoading(false); return }
-      setRes(resR.data as ResData)
+      const resData = resR.data as ResData
+      setRes(resData)
       setPaidSum((paysR.data ?? []).reduce((sum, p) => sum + Number(p.amount), 0))
       const dogList: DogData[] = []
       for (const row of rdR.data ?? []) {
@@ -86,6 +92,12 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
         if (d) dogList.push({ id: d.id, name: d.name, birthdate: d.birthdate })
       }
       setDogs(dogList)
+      // Rebuild the breakdown from the rate VERSION this booking was priced under,
+      // so it always matches the frozen total even after rates change. Legacy rows
+      // without a version fall back to current rates.
+      const ratesR = resData.rate_version_id != null
+        ? await supabase.rpc('get_rate_version', { p_id: resData.rate_version_id })
+        : await supabase.rpc('get_pricing_rates')
       if (ratesR.data) setRates(ratesR.data as RateTable)
       setLoading(false)
     }
@@ -116,6 +128,9 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
   const engineTotal = breakdown.reduce((s, p) => s + p.subtotal, 0)
   const storedTotal = res ? Number(res.total_price) : 0
   const isOverride  = !!res?.price_overridden
+  const isCancelled = res?.status === 'cancelled'
+  const referralDisc = res ? Number(res.referral_discount) : 0
+  const hasReferral  = !isOverride && referralDisc > 0
 
   // When overridden, show the stored total spread evenly across the nights/days.
   const overrideSplit = React.useMemo(
@@ -225,28 +240,53 @@ export function FeeBreakdownModal({ reservationId, onClose }: Props) {
                   </div>
                   <div style={s.summaryRow}>
                     <span style={{ ...s.summaryLabel, fontWeight: 700 }}>Manual override total</span>
-                    <span style={{ ...s.summaryValue, fontWeight: 800, color: 'var(--text-primary)' }}>{fmtMoney(storedTotal)}</span>
+                    <Money value={storedTotal} cancelled={isCancelled} style={{ ...s.summaryValue, fontWeight: 800, color: 'var(--text-primary)' }} />
+                  </div>
+                </>
+              ) : hasReferral ? (
+                <>
+                  <div style={s.summaryRow}>
+                    <span style={s.summaryLabel}>Fee ({breakdown.length} {res?.service_type === 'boarding' ? 'night' : 'day'}{breakdown.length !== 1 ? 's' : ''})</span>
+                    <span style={s.summaryValue}>{fmtMoney(engineTotal)}</span>
+                  </div>
+                  <div style={s.summaryRow}>
+                    <span style={{ ...s.summaryLabel, color: '#b45309' }}>🎁 Referral discount (1 free {res?.service_type === 'boarding' ? 'night' : 'day'})</span>
+                    <span style={{ ...s.summaryValue, color: '#b45309' }}>−{fmtMoney(referralDisc)}</span>
+                  </div>
+                  <div style={s.summaryRow}>
+                    <span style={{ ...s.summaryLabel, fontWeight: 700 }}>Total</span>
+                    <Money value={storedTotal} cancelled={isCancelled} style={{ ...s.summaryValue, fontWeight: 800, color: 'var(--text-primary)' }} />
                   </div>
                 </>
               ) : (
                 <div style={s.summaryRow}>
                   <span style={{ ...s.summaryLabel, fontWeight: 700 }}>Total ({breakdown.length} {res?.service_type === 'boarding' ? 'night' : 'day'}{breakdown.length !== 1 ? 's' : ''})</span>
-                  <span style={{ ...s.summaryValue, fontWeight: 800, color: 'var(--text-primary)' }}>{fmtMoney(storedTotal)}</span>
+                  <Money value={storedTotal} cancelled={isCancelled} style={{ ...s.summaryValue, fontWeight: 800, color: 'var(--text-primary)' }} />
                 </div>
               )}
-              {/* Payment ledger */}
-              <div style={{ ...s.summaryRow, marginTop: 4 }}>
-                <span style={s.summaryLabel}>Paid</span>
-                <span style={s.summaryValue}>{fmtMoney(paidSum)}</span>
-              </div>
-              <div style={s.summaryRow}>
-                <span style={{ ...s.summaryLabel, fontWeight: 700 }}>Balance due</span>
-                <span style={{ ...s.summaryValue, fontWeight: 800, color: balance > 0 ? '#b45309' : '#15803d' }}>{fmtMoney(balance)}</span>
-              </div>
-              <div style={s.summaryRow}>
-                <span style={s.summaryLabel}>Status</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: payColor }}>{payLabel}</span>
-              </div>
+              {isCancelled ? (
+                <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>Cancelled — nothing due or collected.</p>
+              ) : (
+                <>
+                  <div style={{ ...s.summaryRow, marginTop: 4 }}>
+                    <span style={s.summaryLabel}>Payment method</span>
+                    <span style={s.summaryValue}>{res ? (PAY_LABEL[res.payment_method] ?? res.payment_method) : ''}</span>
+                  </div>
+                  {/* Payment ledger */}
+                  <div style={s.summaryRow}>
+                    <span style={s.summaryLabel}>Paid</span>
+                    <span style={s.summaryValue}>{fmtMoney(paidSum)}</span>
+                  </div>
+                  <div style={s.summaryRow}>
+                    <span style={{ ...s.summaryLabel, fontWeight: 700 }}>Balance due</span>
+                    <span style={{ ...s.summaryValue, fontWeight: 800, color: balance > 0 ? '#b45309' : '#15803d' }}>{fmtMoney(balance)}</span>
+                  </div>
+                  <div style={s.summaryRow}>
+                    <span style={s.summaryLabel}>Status</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: payColor }}>{payLabel}</span>
+                  </div>
+                </>
+              )}
             </div>
           </>
         )}
@@ -271,10 +311,11 @@ const s: Record<string, React.CSSProperties> = {
   rateTag:        { fontWeight: 700, fontSize: 12 },
   rateAmt:        { fontWeight: 600, color: 'var(--text-primary)' },
   puppySurcharge: { fontSize: 11, color: 'var(--status-boarding)', fontWeight: 600 },
-  summary:        { borderTop: '2px solid var(--border)', margin: '0 24px', padding: '14px 0 0', display: 'flex', flexDirection: 'column', gap: 6 },
+  summary:        { borderTop: '2px solid var(--border)', margin: '0 24px', padding: '14px 0 20px', display: 'flex', flexDirection: 'column', gap: 6 },
   summaryRow:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   summaryLabel:   { fontSize: 13, color: 'var(--text-secondary)' },
   summaryValue:   { fontSize: 14 },
+  methodSelect:   { fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit', cursor: 'pointer' },
   placeholder:    { padding: '10px 24px 18px', margin: '8px 0 0' },
   muted:          { margin: '20px 24px', fontSize: 13, color: 'var(--text-secondary)' },
 }

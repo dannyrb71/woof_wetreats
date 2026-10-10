@@ -78,6 +78,19 @@ function earnedInRange(b: Booking, start: string, end: string): number {
   for (let d = b.dropoff_date; d < b.pickup_date; d = shift(d, 1)) if (d >= start && d <= end) inRange++
   return total * inRange / n
 }
+// Rover bookings (valued by rate card, stored in rover_earned; separate from Woof analytics).
+interface RoverBk { id: string; service_type: 'boarding' | 'daycare'; status: string; dropoff_date: string; pickup_date: string; rover_earned: number }
+// Accrued Rover rate-card value within [start,end] — same basis as earnedInRange.
+function roverEarnedInRange(b: RoverBk, start: string, end: string): number {
+  if (b.status === 'cancelled') return 0
+  const total = Number(b.rover_earned)
+  if (b.service_type === 'daycare') return b.dropoff_date >= start && b.dropoff_date <= end ? total : 0
+  const n = nightsBetween(b.dropoff_date, b.pickup_date)
+  if (n <= 0) return 0
+  let inRange = 0
+  for (let d = b.dropoff_date; d < b.pickup_date; d = shift(d, 1)) if (d >= start && d <= end) inRange++
+  return total * inRange / n
+}
 // Nights by rate type for a booking (dates only; daycare = one 'daycare' unit).
 function rateTypeNights(b: Booking): Record<string, number> {
   if (b.service_type === 'daycare') return { daycare: 1 }
@@ -122,6 +135,7 @@ export default function ReportsPage() {
   const router = useRouter()
   const supabase = createClient()
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [roverBks, setRoverBks] = useState<RoverBk[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -137,12 +151,14 @@ export default function ReportsPage() {
     if (!session) { router.replace('/auth'); return }
     const { data: isAdmin } = await supabase.rpc('is_admin')
     if (!isAdmin) { router.replace('/'); return }
-    const [bR, pR] = await Promise.all([
+    const [bR, pR, rR] = await Promise.all([
       supabase.rpc('get_analytics_bookings'),
       supabase.rpc('get_analytics_payments'),
+      supabase.rpc('get_rover_earnings'),
     ])
     setBookings((bR.data ?? []) as Booking[])
     setPayments((pR.data ?? []) as Payment[])
+    setRoverBks((rR.data ?? []) as RoverBk[])
     setLoading(false)
   }, [router, supabase])
   useEffect(() => { load() }, [load])
@@ -150,6 +166,7 @@ export default function ReportsPage() {
   // Service filter applied to the working sets.
   const bks = useMemo(() => svc === 'all' ? bookings : bookings.filter(b => b.service_type === svc), [bookings, svc])
   const pays = useMemo(() => svc === 'all' ? payments : payments.filter(p => p.service_type === svc), [payments, svc])
+  const roverF = useMemo(() => svc === 'all' ? roverBks : roverBks.filter(b => b.service_type === svc), [roverBks, svc])
 
   const range = rangeBounds(view, anchor)
   const cmpAnchor = compareAnchor(view, anchor, compare)
@@ -158,6 +175,7 @@ export default function ReportsPage() {
   // ── Metric helpers over an arbitrary range ──
   const inRange = (d: string, r: { start: string; end: string }) => d >= r.start && d <= r.end
   const earned = (r: { start: string; end: string }) => bks.reduce((s, b) => s + earnedInRange(b, r.start, r.end), 0)
+  const roverEarned = (r: { start: string; end: string }) => roverF.reduce((s, b) => s + roverEarnedInRange(b, r.start, r.end), 0)
   const collected = (r: { start: string; end: string }) => pays.filter(p => inRange(p.paid_on, r)).reduce((s, p) => s + Number(p.amount), 0)
   const bookedIn = (r: { start: string; end: string }) => bks.filter(b => b.status !== 'cancelled' && inRange(b.dropoff_date, r))
   const bookingCount = (r: { start: string; end: string }) => bookedIn(r).length
@@ -168,6 +186,7 @@ export default function ReportsPage() {
   // ── KPI scorecards ──
   const kpis = [
     { label: 'Earned', now: earned(range), prev: cmpRange ? earned(cmpRange) : null, fmt: money },
+    { label: 'Rover Earned', now: roverEarned(range), prev: cmpRange ? roverEarned(cmpRange) : null, fmt: money },
     { label: 'Collected', now: collected(range), prev: cmpRange ? collected(cmpRange) : null, fmt: money },
     { label: 'Bookings', now: bookingCount(range), prev: cmpRange ? bookingCount(cmpRange) : null, fmt: (n: number) => String(n) },
     { label: 'New clients', now: newClientCount(range), prev: cmpRange ? newClientCount(cmpRange) : null, fmt: (n: number) => String(n) },

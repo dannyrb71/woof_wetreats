@@ -23,7 +23,7 @@ import { SectionHeader } from '@/components/shared/molecules/SectionHeader'
 interface Res {
   id: string; service_type: string; status: string
   dropoff_date: string; dropoff_time: string; pickup_date: string; pickup_time: string
-  total_price: number; paid: boolean; paid_at: string | null
+  total_price: number; paid: boolean; paid_at: string | null; rover_earned: number | null
 }
 interface HereDog { name: string; gender: string | null; photo_url: string | null; photoSigned: string | null }
 
@@ -73,7 +73,7 @@ export default function DashboardPage() {
 
     const [resR, mgR, payR] = await Promise.all([
       supabase.from('reservations')
-        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, total_price, paid, paid_at')
+        .select('id, service_type, status, dropoff_date, dropoff_time, pickup_date, pickup_time, total_price, paid, paid_at, rover_earned')
         .neq('status', 'cancelled'),
       supabase.from('meet_greets').select('scheduled_time').eq('scheduled_date', d).neq('status', 'cancelled'),
       supabase.from('reservation_payments').select('amount, paid_on'),
@@ -134,6 +134,17 @@ export default function DashboardPage() {
       return sum + Number(r.total_price) / nights
     }, 0) +
     daycareToday.reduce((sum, r) => sum + Number(r.total_price), 0)
+  // Rover Today = same accrual basis, but from each Rover booking's rate-card value
+  // (rover_earned). Rover bookings carry total_price = 0 so they never hit Earned/Collected;
+  // only reservations flagged with a rover_earned value count here.
+  const roverToday =
+    presentBoarding.reduce((sum, r) => {
+      if (r.rover_earned == null) return sum
+      const nights = Math.max(1, Math.round(
+        (new Date(r.pickup_date + 'T00:00:00').getTime() - new Date(r.dropoff_date + 'T00:00:00').getTime()) / 86400000))
+      return sum + Number(r.rover_earned) / nights
+    }, 0) +
+    daycareToday.reduce((sum, r) => r.rover_earned == null ? sum : sum + Number(r.rover_earned), 0)
   // Unpaid splits by status: completed = genuinely overdue (Outstanding); upcoming
   // or in-progress = money expected but not yet collected (Upcoming Income).
   const outstanding    = notCancelled.filter(r => !r.paid && r.status === 'completed').reduce((s, r) => s + Number(r.total_price), 0)
@@ -189,6 +200,7 @@ export default function DashboardPage() {
     { label: 'Meet & Greets', value: String(mg.length),         sub: `Next: ${fmtTime(nextTime(mg.map(m => m.scheduled_time)))}`, link: true },
     { label: 'Collected',     value: money(revenueToday),       sub: 'Payments received', link: false },
     { label: 'Earned',        value: money(earnedToday),        sub: 'Accrued value', link: false },
+    { label: 'Rover',         value: money(roverToday),         sub: 'Rover accrued', link: false },
   ]
 
   return (
